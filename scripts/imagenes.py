@@ -27,7 +27,7 @@ LIMITLESS = "https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/tpci"
 PTCG_API = "https://api.pokemontcg.io/v2/cards"
 
 # Expansión de TCGdex -> código de Limitless (y cómo pasar el número: "SWSH251" -> "251").
-LIMITLESS_SETS = {"svp": "SVP", "sve": "SVE", "mep": "MEP", "mee": "MEE", "swshp": "SP"}
+LIMITLESS_SETS = {"svp": "SVP", "sve": "SVE", "mep": "MEP", "mee": "MEE", "swshp": "SP", "30th": "30C"}
 # Expansión de TCGdex -> expansión de pokemontcg.io.
 PTCG_SETS = {
     "swsh4.5sv": "swsh45sv", "sm7.5": "sm75", "swsh12.5gg": "swsh12pt5gg", "smp": "smp", "swshp": "swshp",
@@ -126,13 +126,28 @@ class PokemonTCG:
 def resolver(fichas, tiene_tcgdex, oficial, data_dir, hoy):
     """Pone imagen a las cartas de `fichas` ({set_id: ficha}) que TCGdex no tiene.
 
-    tiene_tcgdex: ids de las cartas con imagen propia en TCGdex. oficial(set_id, número): URL de pokemon.com.
-    Devuelve {id: url pequeña} de las resueltas, para el índice de búsqueda ("~" delante si es provisional)."""
+    tiene_tcgdex: ids de las cartas que según TCGdex tienen imagen. oficial(set_id, número): URL de pokemon.com.
+    Devuelve ({id: url pequeña} de las resueltas, con "~" delante si es provisional; ids cuya imagen de TCGdex
+    existe de verdad), para el índice de búsqueda."""
     path = os.path.join(data_dir, "imagenes.json")
     try:
-        guardado = json.load(open(path)).get("cards", {})
+        previo = json.load(open(path))
     except (OSError, ValueError):
-        guardado = {}
+        previo = {}
+    guardado = previo.get("cards", {})
+    verificadas = set(previo.get("ok", []))
+
+    # TCGdex a veces dice que tiene la imagen y no existe: se comprueba una vez cada carta (y se recuerda).
+    cartas = {c["id"]: c for f in fichas.values() for c in f["cards"]}
+    por_mirar = [cid for cid in tiene_tcgdex if cid in cartas and cid not in verificadas and cartas[cid].get("img")]
+    with ThreadPoolExecutor(WORKERS) as ex:
+        for cid, ok in zip(por_mirar, ex.map(lambda cid: existe(cartas[cid]["img"]), por_mirar)):
+            if ok:
+                verificadas.add(cid)
+    rotas = {cid for cid in por_mirar if cid not in verificadas}
+    tiene_tcgdex = {cid for cid in tiene_tcgdex if cid not in rotas}
+    if por_mirar:
+        print(f"Imágenes de TCGdex comprobadas: {len(por_mirar)}, rotas: {len(rotas)}")
 
     # Para el último recurso: cartas con imagen de TCGdex por nombre, en orden (las más nuevas al final).
     por_nombre = {}
@@ -210,9 +225,10 @@ def resolver(fichas, tiene_tcgdex, oficial, data_dir, hoy):
     guardado = {k: v for k, v in guardado.items() if k not in tiene_tcgdex}
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"updated": hoy, "cards": guardado}, f, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        json.dump({"updated": hoy, "cards": guardado, "ok": sorted(verificadas)}, f,
+                  ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     os.replace(tmp, path)
     n_aprox = sum(1 for v in guardado.values() if v.get("approx"))
     sin = sum(1 for f in fichas.values() for c in f["cards"] if c["id"] not in tiene_tcgdex and c["id"] not in resueltas)
     print(f"Imágenes: {len(resueltas)} cartas sin imagen en TCGdex resueltas ({n_aprox} provisionales), {sin} sin ninguna")
-    return resueltas
+    return resueltas, tiene_tcgdex

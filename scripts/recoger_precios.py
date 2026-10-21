@@ -265,8 +265,8 @@ def main():
     # Imagen para las cartas que TCGdex no tiene. Si algo falla aquí, se publica igual (con las de TCGdex).
     tiene_tcgdex = {fila[0] for r in resultados.values() for fila in r[2] if fila[6]}
     try:
-        resueltas = imagenes.resolver({sid: r[0] for sid, r in resultados.items()}, tiene_tcgdex,
-                                      imagen_oficial, DATA, hoy)
+        resueltas, tiene_tcgdex = imagenes.resolver({sid: r[0] for sid, r in resultados.items()}, tiene_tcgdex,
+                                                    imagen_oficial, DATA, hoy)
     except Exception as e:
         print(f"::warning title=imágenes::no se pudieron buscar imágenes extra: {e}")
         resueltas = {}
