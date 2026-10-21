@@ -1,44 +1,64 @@
 #!/usr/bin/env python3
-"""Recoge cada día los precios de Cardmarket (vía TCGdex) de las cartas de los álbumes del grupo.
+"""Recoge cada día el precio de Cardmarket (vía TCGdex) de TODAS las cartas de todas las expansiones
+en español y genera el índice de búsqueda de cartas.
 
-- Lee de Firestore (solo lectura) qué álbumes coleccionáis entre todos.
-- Para cada álbum descarga el precio de cada carta y lo añade a history/<álbum>.json:
+Escribe en la carpeta de datos (por defecto ./data, que en GitHub es la rama `data`):
+
+- history/<expansión>.json   historial de precios de esa expansión
     {
       "set": "30th",
-      "updated": "2026-10-21T07:30:00Z",
-      "dates": ["2026-10-21", ...],                 # un día por columna
-      "cards": {"30th-001": [0.05, ...], ...},       # tendencia de Cardmarket de cada día (null si no había)
-      "latest": {"30th-001": [0.05, 0.06, 0.07, 0.08], ...}   # hoy: tendencia, media 1 día, 7 días, 30 días
+      "updated": "2026-10-22T02:30:00Z",
+      "dates": ["2026-10-21", "2026-10-22"],             # un día por columna
+      "cards": {"30th-001": [0.05, 0.06], ...},           # tendencia de Cardmarket de cada día (null si no había)
+      "latest": {"30th-001": [0.06, 0.05, 0.06, 0.08]}    # hoy: tendencia, media 1 día, 7 días, 30 días
     }
-La app y la web leen estos archivos; no se guarda nada en Firebase.
+- index/cards.json           índice de búsqueda con todas las cartas
+    {
+      "updated": "2026-10-22",
+      "sets": {"30th": ["Celebración 30.º Aniversario", "me", "es"], ...},   # nombre, serie, idioma de los datos
+      "cards": [["30th-001", "30th", "001", "Exeggcute", "Común", 0.05, 1], ...]
+                # id, expansión, número, nombre, rareza, precio de hoy, 1 si TCGdex tiene imagen
+    }
+
+Uso:  python3 scripts/recoger_precios.py [carpeta de datos]
 """
 import datetime as dt
 import json
 import os
+import sys
+import time
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 API = "https://api.tcgdex.net/v2"
-FIRESTORE = ("https://firestore.googleapis.com/v1/projects/poketcg-d9699/databases/(default)/documents/players"
-             "?pageSize=300&key=AIzaSyBiHj-DDHwU76C93TXyPX525GYnF2e9y8I&mask.fieldPaths=albums")
-DEFAULT_ALBUMS = ["30th", "30th-c"]          # quien no ha elegido álbumes colecciona estos
-ALWAYS = ["30th", "30th-c", "mep"]            # se siguen siempre
-ROOT = os.path.join(os.path.dirname(__file__), "..")
-UA = {"User-Agent": "tradeo-precios"}
+UA = {"User-Agent": "tradeo-precios (https://github.com/SergiosDiaz/tradeo-precios)"}
+DATA = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "data")
+WORKERS = 8   # pocas peticiones a la vez: TCGdex es un servicio gratuito y comunitario
+
+RAREZAS_EN = {
+    "Common": "Común", "Uncommon": "Infrecuente", "Rare": "Rara", "Rare Holo": "Rara Holo",
+    "Double rare": "Rara Doble", "Ultra Rare": "Ultra Rara", "Illustration rare": "Rara Ilustración",
+    "Special illustration rare": "Rara Ilustración Especial", "Hyper rare": "Rara Híper",
+    "Secret Rare": "Rara Secreta", "Pikachu Rare": "Rara Pikachu", "RGB Rare": "Rara RGB",
+    "Futuristic Rare": "Rara Futurista", "None": "—", "Ninguno": "—",
+}
 
 
-def get(url):
-    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=60) as r:
-        return json.load(r)
-
-
-def albums_del_grupo():
-    ids = set(ALWAYS)
-    for doc in get(FIRESTORE).get("documents", []):
-        values = doc.get("fields", {}).get("albums", {}).get("arrayValue", {}).get("values")
-        ids.update(v["stringValue"] for v in values or []) if values is not None else ids.update(DEFAULT_ALBUMS)
-    return sorted(ids)
+def get(url, retries=2):
+    for intento in range(retries + 1):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=60) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                raise
+            if intento == retries:
+                raise
+        except Exception:
+            if intento == retries:
+                raise
+        time.sleep(2 * (intento + 1))
 
 
 def precios(card):
@@ -55,35 +75,36 @@ def precios(card):
     return [pick("trend", "avg30", "avg"), pick("avg1"), pick("avg7"), pick("avg30")]
 
 
+def expansiones():
+    series = [s["id"] for s in get(f"{API}/es/series") if s["id"] != "tcgp"]   # TCG Pocket es digital
+    out = []
+    for sid in series:
+        for x in get(f"{API}/es/series/{sid}").get("sets", []):
+            out.append((x["id"], x.get("name", x["id"]), sid))
+    return out
+
+
 def cartas_de(set_id):
+    """Cartas de una expansión en español; si TCGdex no la tiene en español, en inglés."""
     for lang in ("es", "en"):
         try:
-            cards = get(f"{API}/{lang}/sets/{set_id}").get("cards") or []
+            cards = get(f"{API}/{lang}/sets/{urllib.parse.quote(set_id)}").get("cards") or []
         except Exception:
             cards = []
         if cards:
-            return lang, [c["id"] for c in cards]
+            return lang, cards
     return None, []
 
 
-def precio_carta(lang, cid):
+def ficha(lang, brief):
     try:
-        return cid, precios(get(f"{API}/{lang}/cards/{urllib.parse.quote(cid)}"))
+        return brief, get(f"{API}/{lang}/cards/{urllib.parse.quote(brief['id'])}")
     except Exception:
-        return cid, None
+        return brief, None
 
 
-def actualizar(set_id, hoy):
-    path = os.path.join(ROOT, "history", f"{set_id}.json")
-    if os.path.exists(path) and hoy in json.load(open(path)).get("dates", []):
-        return False  # ya tiene los precios de hoy (el robot pasa cada hora para recoger expansiones nuevas)
-    lang, ids = cartas_de(set_id)
-    if not ids:
-        print(f"{set_id}: sin cartas en TCGdex")
-        return False
-    with ThreadPoolExecutor(16) as ex:
-        latest = {cid: p for cid, p in ex.map(lambda c: precio_carta(lang, c), ids) if p and p[0] is not None}
-
+def guardar_historial(set_id, hoy, latest):
+    path = os.path.join(DATA, "history", f"{set_id}.json")
     data = json.load(open(path)) if os.path.exists(path) else {"set": set_id, "dates": [], "cards": {}}
     dates, cards = data["dates"], data["cards"]
     if hoy in dates:
@@ -101,20 +122,40 @@ def actualizar(set_id, hoy):
     data["updated"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, separators=(",", ":"), sort_keys=True)
-    print(f"{set_id}: {len(latest)}/{len(ids)} cartas con precio, {len(dates)} días")
-    return True
 
 
 def main():
     hoy = dt.date.today().isoformat()
-    sets = albums_del_grupo()
-    cambios = [s for s in sets if actualizar(s, hoy)]
-    index = os.path.join(ROOT, "history", "index.json")
-    previo = json.load(open(index)) if os.path.exists(index) else {}
-    if cambios or previo.get("sets") != sets:
-        with open(index, "w", encoding="utf-8") as f:
-            json.dump({"updated": hoy, "sets": sets}, f, separators=(",", ":"))
-    print("Actualizadas:", ", ".join(cambios) or "ninguna (todo al día)")
+    os.makedirs(os.path.join(DATA, "history"), exist_ok=True)
+    os.makedirs(os.path.join(DATA, "index"), exist_ok=True)
+    inicio = time.time()
+    index_sets, index_cards, total = {}, [], 0
+
+    for set_id, nombre, serie in expansiones():
+        lang, briefs = cartas_de(set_id)
+        if not briefs:
+            print(f"{set_id}: sin cartas en TCGdex")
+            continue
+        index_sets[set_id] = [nombre, serie, lang]
+        with ThreadPoolExecutor(WORKERS) as ex:
+            fichas = list(ex.map(lambda b: ficha(lang, b), briefs))
+        latest = {}
+        for brief, d in fichas:
+            d = d or brief
+            p = precios(d)
+            if p[0] is not None:
+                latest[brief["id"]] = p
+            rareza = d.get("rarity")
+            index_cards.append([brief["id"], set_id, brief.get("localId", ""), d.get("name", brief.get("name", "")),
+                                RAREZAS_EN.get(rareza, rareza) if rareza else "—", p[0], 1 if brief.get("image") else 0])
+        if latest:
+            guardar_historial(set_id, hoy, latest)
+        total += len(briefs)
+        print(f"{set_id} ({lang}): {len(latest)}/{len(briefs)} con precio")
+
+    with open(os.path.join(DATA, "index", "cards.json"), "w", encoding="utf-8") as f:
+        json.dump({"updated": hoy, "sets": index_sets, "cards": index_cards}, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"\n{len(index_sets)} expansiones, {total} cartas en {time.time() - inicio:.0f} s")
 
 
 if __name__ == "__main__":

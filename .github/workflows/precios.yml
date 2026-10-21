@@ -2,27 +2,43 @@ name: Precios diarios
 
 on:
   schedule:
-    - cron: "17 * * * *"   # cada hora: la primera pasada del día actualiza todos los precios;
-                           # las demás solo recogen expansiones que alguien acabe de añadir
+    - cron: "17 2 * * *"   # todos los días a las 02:17 UTC (de madrugada en España)
   workflow_dispatch: {}      # también se puede lanzar a mano desde la pestaña Actions
 
 permissions:
   contents: write
 
+concurrency: precios
+
 jobs:
   precios:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+
+      - name: Traer los datos de ayer (rama data)
+        run: |
+          mkdir -p data
+          if git fetch --depth 1 origin data; then
+            git archive FETCH_HEAD | tar -x -C data
+          fi
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Recoger precios de Cardmarket (TCGdex)
-        run: python3 scripts/recoger_precios.py
-      - name: Guardar
+
+      - name: Recoger precios de todas las cartas (TCGdex) e índice de búsqueda
+        run: python3 scripts/recoger_precios.py data
+
+      - name: Publicar en la rama data (un solo commit, sin versiones antiguas)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          cd data
+          git init -q -b data
           git config user.name "tradeo-bot"
           git config user.email "tradeo-bot@users.noreply.github.com"
-          git add history
-          git diff --cached --quiet || git commit -m "Precios $(date -u +%F)"
-          git push
+          git add -A
+          git commit -q -m "Precios $(date -u +%F)"
+          git push -f -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data
