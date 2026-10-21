@@ -11,7 +11,8 @@ general de Cardmarket, y publica tres cosas en la carpeta de datos (por defecto 
 - index/cards.json           índice de búsqueda:
     {"updated": "...", "sets": {"30th": ["Celebración 30.º Aniversario", "me", "es"]},
      "cards": [["30th-001", "30th", "001", "Exeggcute", "Común", 0.05, 1], ...]}
-                # id, expansión, número, nombre, rareza, precio de hoy, 1 si TCGdex tiene imagen
+                # id, expansión, número, nombre, rareza, precio de hoy,
+                # imagen: 1 si TCGdex la tiene, la URL si se ha encontrado en otro sitio (ver imagenes.py), 0 si no hay
 
 Si una expansión falla (no se puede descargar tras varios intentos, o llega sin los precios que tenía ayer),
 esa expansión se queda con los datos del día anterior y el resto se publica. Si fallan demasiadas a la vez
@@ -30,12 +31,14 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
+import imagenes
+
 API = "https://api.tcgdex.net/v2"
 OFICIAL = "https://assets.pokemon.com/static-assets/content-assets/cms2-es-es/img/cards/web"
 UA = {"User-Agent": "tradeo-precios (https://github.com/SergiosDiaz/tradeo-precios)"}
 DATA = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "data")
 WORKERS = 8      # pocas peticiones a la vez: TCGdex es un servicio gratuito y comunitario
-SET_VERSION = 5  # versión del formato de sets/<expansión>.json (la misma que espera la app)
+SET_VERSION = 6  # versión del formato de sets/<expansión>.json (la misma que espera la app)
 MAX_FALLOS = 0.2 # si falla más de esta parte de las expansiones, TCGdex debe de estar caído: no se publica nada
 
 RAREZAS = {
@@ -257,6 +260,19 @@ def main():
     if len(fallos) > len(expansiones) * MAX_FALLOS:
         print(f"\n{len(fallos)} de {len(expansiones)} expansiones con errores: no se publica nada hoy.")
         sys.exit(1)
+
+    # Imagen para las cartas que TCGdex no tiene. Si algo falla aquí, se publica igual (con las de TCGdex).
+    tiene_tcgdex = {fila[0] for r in resultados.values() for fila in r[2] if fila[6]}
+    try:
+        resueltas = imagenes.resolver({sid: r[0] for sid, r in resultados.items()}, tiene_tcgdex,
+                                      imagen_oficial, DATA, hoy)
+    except Exception as e:
+        print(f"::warning title=imágenes::no se pudieron buscar imágenes extra: {e}")
+        resueltas = {}
+    for r in resultados.values():
+        for fila in r[2]:
+            # En el índice: 1 si TCGdex tiene imagen, la URL si se ha encontrado en otro sitio, 0 si no hay.
+            fila[6] = 1 if fila[0] in tiene_tcgdex else resueltas.get(fila[0], 0)
 
     # Lo que ha ido bien se publica; lo que ha fallado se queda con los datos del día anterior.
     index_sets, index_cards = {}, []

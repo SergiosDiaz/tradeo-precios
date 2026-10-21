@@ -18,6 +18,11 @@ Precios diarios de Cardmarket (vía [TCGdex](https://tcgdex.dev)) de **todas** l
 ilustrador y precios de hoy), en el mismo formato que usan la app y la web. Así abrir un álbum por primera vez es
 descargar un solo archivo en vez de hacer cientos de peticiones a TCGdex.
 
+`imagenes.json`: imagen encontrada fuera de TCGdex para las cartas que TCGdex no tiene (ver [`scripts/imagenes.py`](scripts/imagenes.py)):
+oficial en español de pokemon.com, Limitless, TCGdex en inglés, pokemontcg.io o, como último recurso, la de otra
+versión de la misma carta (marcada como provisional con `approx`). Se guarda para no repetir la búsqueda; las
+provisionales se vuelven a mirar cada día por si ya ha salido la buena.
+
 `history/<expansión>.json`: historial de precios de una expansión.
 
 ```json
@@ -43,7 +48,7 @@ descargar un solo archivo en vez de hacer cientos de peticiones a TCGdex.
 }
 ```
 
-Cada carta: id, expansión, número, nombre, rareza, precio de hoy y `1` si TCGdex tiene su imagen.
+Cada carta: id, expansión, número, nombre, rareza, precio de hoy e imagen: `1` si TCGdex la tiene, la URL si se ha encontrado en otro sitio, `0` si no hay ninguna.
 `sets` da el nombre de cada expansión, su serie y el idioma de los datos (`en` si TCGdex no la tiene en español).
 
 Los precios son la tendencia general de Cardmarket (mezcla todos los idiomas y estados).
