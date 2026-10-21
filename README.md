@@ -5,9 +5,10 @@ Precios diarios de Cardmarket (vía [TCGdex](https://tcgdex.dev)) de **todas** l
 - Cada día de madrugada, [`precios.yml`](.github/workflows/precios.yml) ejecuta [`scripts/recoger_precios.py`](scripts/recoger_precios.py):
   recorre las 145 expansiones en español (unas 17.000 cartas, con pocas peticiones a la vez para no cargar TCGdex),
   guarda la ficha de cada expansión, añade el precio del día de cada carta a su historial y genera el índice de búsqueda.
-- Primero lo descarga todo; solo si **no ha fallado nada** escribe y publica. Si una expansión o una carta no se puede
-  descargar tras varios intentos, o si una expansión que ayer tenía precios llega casi sin ellos (TCGdex a veces
-  la sirve a medio actualizar), el robot termina con error y los datos del día anterior se quedan como estaban.
+- Primero lo descarga todo y después publica **lo que ha ido bien**. Si una expansión falla (no se puede descargar tras
+  varios intentos, o llega sin los precios que tenía ayer porque TCGdex la sirve a medio actualizar), esa expansión se
+  queda con los datos del día anterior y sale un aviso en la ejecución de GitHub. Si falla más del 20 % de las
+  expansiones (TCGdex caído), no se publica nada y la ejecución termina con error.
 - Los datos se publican en la rama [`data`](https://github.com/SergiosDiaz/tradeo-precios/tree/data), que se reescribe cada día como un único commit: así el repositorio no crece guardando versiones antiguas.
 - Para lanzarlo a mano: pestaña **Actions → Precios diarios → Run workflow**.
 

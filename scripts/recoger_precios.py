@@ -13,8 +13,9 @@ general de Cardmarket, y publica tres cosas en la carpeta de datos (por defecto 
      "cards": [["30th-001", "30th", "001", "Exeggcute", "Común", 0.05, 1], ...]}
                 # id, expansión, número, nombre, rareza, precio de hoy, 1 si TCGdex tiene imagen
 
-Si algo falla (una expansión o una carta que no se puede descargar tras varios intentos), no escribe nada y
-termina con error: así nunca se publica un índice o un historial a medias.
+Si una expansión falla (no se puede descargar tras varios intentos, o llega sin los precios que tenía ayer),
+esa expansión se queda con los datos del día anterior y el resto se publica. Si fallan demasiadas a la vez
+(TCGdex caído), no escribe nada y termina con error.
 
 Uso:  python3 scripts/recoger_precios.py [carpeta de datos]
 """
@@ -35,6 +36,7 @@ UA = {"User-Agent": "tradeo-precios (https://github.com/SergiosDiaz/tradeo-preci
 DATA = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "data")
 WORKERS = 8      # pocas peticiones a la vez: TCGdex es un servicio gratuito y comunitario
 SET_VERSION = 5  # versión del formato de sets/<expansión>.json (la misma que espera la app)
+MAX_FALLOS = 0.2 # si falla más de esta parte de las expansiones, TCGdex debe de estar caído: no se publica nada
 
 RAREZAS = {
     "Common": "Común", "Uncommon": "Infrecuente", "Rare": "Rara", "Rare Holo": "Rara Holo",
@@ -203,17 +205,32 @@ def escribir(path, data):
     os.replace(tmp, path)
 
 
+def indice_anterior():
+    """Expansiones y filas del índice publicado la última vez, por expansión."""
+    try:
+        j = json.load(open(os.path.join(DATA, "index", "cards.json")))
+    except (OSError, ValueError):
+        return {}, {}
+    filas = {}
+    for c in j.get("cards", []):
+        filas.setdefault(c[1], []).append(c)
+    return j.get("sets", {}), filas
+
+
 def main():
     hoy = dt.date.today().isoformat()
     inicio = time.time()
     series = [s["id"] for s in get(f"{API}/es/series") if s["id"] != "tcgp"]   # TCG Pocket es digital
     expansiones = [(x["id"], sid) for sid in series for x in (get(f"{API}/es/series/{sid}") or {}).get("sets", [])]
+    sets_ayer, filas_ayer = indice_anterior()
 
-    # Primero se descarga todo en memoria; solo si no hay ningún fallo se escribe.
-    resultados, fallos = [], []
+    # Primero se descarga todo en memoria y después se escribe.
+    resultados, fallos = {}, {}
     for set_id, serie in expansiones:
         try:
             r = expansion(set_id, serie)
+            if not r and set_id in sets_ayer:
+                raise Fallo("TCGdex no devuelve ninguna carta")
             # TCGdex a veces devuelve una expansión a medio actualizar, sin precios. Si ayer tenía precios
             # y hoy faltan más de la mitad, se reintenta; si sigue igual, cuenta como fallo.
             antes = precios_de_ayer(set_id)
@@ -227,28 +244,41 @@ def main():
                 if r and antes >= 5 and len(r[1]) < antes / 2:
                     raise Fallo(f"solo {len(r[1])} cartas con precio (ayer {antes})")
         except Fallo as e:
-            fallos.append(f"{set_id}: {e}")
+            fallos[set_id] = str(e)
             print(f"✗ {set_id}: {e}")
             continue
         if not r:
             print(f"{set_id}: sin cartas en TCGdex")
             continue
-        resultados.append((set_id, *r))
+        resultados[set_id] = r
         print(f"{set_id} ({r[3]}): {len(r[1])}/{len(r[0]['cards'])} con precio")
 
-    if fallos:
-        print(f"\n{len(fallos)} expansiones con errores: no se publica nada hoy.")
+    # Si falla mucho a la vez, lo más probable es que TCGdex esté caído: mejor no tocar nada.
+    if len(fallos) > len(expansiones) * MAX_FALLOS:
+        print(f"\n{len(fallos)} de {len(expansiones)} expansiones con errores: no se publica nada hoy.")
         sys.exit(1)
 
+    # Lo que ha ido bien se publica; lo que ha fallado se queda con los datos del día anterior.
     index_sets, index_cards = {}, []
-    for set_id, ficha_set, latest, index, lang in resultados:
-        escribir(os.path.join(DATA, "sets", f"{set_id}.json"), ficha_set)
-        if latest:
-            escribir(os.path.join(DATA, "history", f"{set_id}.json"), historial(set_id, hoy, latest))
-        index_sets[set_id] = [ficha_set["name"], ficha_set["serie"], lang]
-        index_cards += index
+    for set_id, _ in expansiones:
+        if set_id in resultados:
+            ficha_set, latest, index, lang = resultados[set_id]
+            escribir(os.path.join(DATA, "sets", f"{set_id}.json"), ficha_set)
+            if latest:
+                escribir(os.path.join(DATA, "history", f"{set_id}.json"), historial(set_id, hoy, latest))
+            index_sets[set_id] = [ficha_set["name"], ficha_set["serie"], lang]
+            index_cards += index
+        elif set_id in fallos:
+            if set_id in sets_ayer:
+                index_sets[set_id] = sets_ayer[set_id]
+                index_cards += filas_ayer.get(set_id, [])
+                aviso = "se quedan los datos del día anterior"
+            else:
+                aviso = "aún no tenía datos publicados, hoy no se publica"
+            print(f"::warning title={set_id}::{fallos[set_id]}: {aviso}")   # aviso visible en GitHub Actions
     escribir(os.path.join(DATA, "index", "cards.json"), {"updated": hoy, "sets": index_sets, "cards": index_cards})
-    print(f"\n{len(index_sets)} expansiones, {len(index_cards)} cartas en {time.time() - inicio:.0f} s")
+    print(f"\n{len(index_sets)} expansiones ({len(fallos)} con los datos del día anterior), "
+          f"{len(index_cards)} cartas en {time.time() - inicio:.0f} s")
 
 
 if __name__ == "__main__":
