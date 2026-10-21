@@ -74,14 +74,16 @@ def precio_carta(lang, cid):
 
 
 def actualizar(set_id, hoy):
+    path = os.path.join(ROOT, "history", f"{set_id}.json")
+    if os.path.exists(path) and hoy in json.load(open(path)).get("dates", []):
+        return False  # ya tiene los precios de hoy (el robot pasa cada hora para recoger expansiones nuevas)
     lang, ids = cartas_de(set_id)
     if not ids:
         print(f"{set_id}: sin cartas en TCGdex")
-        return
+        return False
     with ThreadPoolExecutor(16) as ex:
         latest = {cid: p for cid, p in ex.map(lambda c: precio_carta(lang, c), ids) if p and p[0] is not None}
 
-    path = os.path.join(ROOT, "history", f"{set_id}.json")
     data = json.load(open(path)) if os.path.exists(path) else {"set": set_id, "dates": [], "cards": {}}
     dates, cards = data["dates"], data["cards"]
     if hoy in dates:
@@ -100,15 +102,19 @@ def actualizar(set_id, hoy):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, separators=(",", ":"), sort_keys=True)
     print(f"{set_id}: {len(latest)}/{len(ids)} cartas con precio, {len(dates)} días")
+    return True
 
 
 def main():
     hoy = dt.date.today().isoformat()
     sets = albums_del_grupo()
-    for set_id in sets:
-        actualizar(set_id, hoy)
-    with open(os.path.join(ROOT, "history", "index.json"), "w", encoding="utf-8") as f:
-        json.dump({"updated": hoy, "sets": sets}, f, separators=(",", ":"))
+    cambios = [s for s in sets if actualizar(s, hoy)]
+    index = os.path.join(ROOT, "history", "index.json")
+    previo = json.load(open(index)) if os.path.exists(index) else {}
+    if cambios or previo.get("sets") != sets:
+        with open(index, "w", encoding="utf-8") as f:
+            json.dump({"updated": hoy, "sets": sets}, f, separators=(",", ":"))
+    print("Actualizadas:", ", ".join(cambios) or "ninguna (todo al día)")
 
 
 if __name__ == "__main__":

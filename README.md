@@ -2,8 +2,9 @@
 
 Historial diario de precios de Cardmarket (vía [TCGdex](https://tcgdex.dev)) de las cartas que colecciona el grupo en la app **Tradeo** y en la web del álbum.
 
-- Cada día, [`precios.yml`](.github/workflows/precios.yml) ejecuta [`scripts/recoger_precios.py`](scripts/recoger_precios.py):
-  lee de Firebase (solo lectura) qué expansiones coleccionáis entre todos y añade el precio del día de cada carta a `history/<expansión>.json`.
+- Cada hora, [`precios.yml`](.github/workflows/precios.yml) ejecuta [`scripts/recoger_precios.py`](scripts/recoger_precios.py):
+  lee de Firebase (solo lectura) qué expansiones coleccionáis entre todos y, si una expansión aún no tiene el precio de hoy, añade el precio del día de cada carta a `history/<expansión>.json`.
+  Así los precios se actualizan una vez al día y una expansión recién añadida se recoge en menos de una hora.
 - La app y la web leen esos archivos desde `https://raw.githubusercontent.com/SergiosDiaz/tradeo-precios/main/history/<expansión>.json`.
 - Para lanzarlo a mano: pestaña **Actions → Precios diarios → Run workflow**.
 

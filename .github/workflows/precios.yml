@@ -2,7 +2,8 @@ name: Precios diarios
 
 on:
   schedule:
-    - cron: "30 5 * * *"   # todos los días a las 05:30 UTC (07:30 en España en verano, 06:30 en invierno)
+    - cron: "17 * * * *"   # cada hora: la primera pasada del día actualiza todos los precios;
+                           # las demás solo recogen expansiones que alguien acabe de añadir
   workflow_dispatch: {}      # también se puede lanzar a mano desde la pestaña Actions
 
 permissions:
