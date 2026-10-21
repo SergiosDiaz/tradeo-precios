@@ -166,6 +166,15 @@ def expansion(set_id, serie):
     return ficha_set, latest, index, lang
 
 
+def precios_de_ayer(set_id):
+    """Cuántas cartas de la expansión tenían precio en la última publicación."""
+    path = os.path.join(DATA, "history", f"{set_id}.json")
+    try:
+        return len(json.load(open(path)).get("latest") or {})
+    except (OSError, ValueError):
+        return 0
+
+
 def historial(set_id, hoy, latest):
     path = os.path.join(DATA, "history", f"{set_id}.json")
     data = json.load(open(path)) if os.path.exists(path) else {"set": set_id, "dates": [], "cards": {}}
@@ -205,6 +214,18 @@ def main():
     for set_id, serie in expansiones:
         try:
             r = expansion(set_id, serie)
+            # TCGdex a veces devuelve una expansión a medio actualizar, sin precios. Si ayer tenía precios
+            # y hoy faltan más de la mitad, se reintenta; si sigue igual, cuenta como fallo.
+            antes = precios_de_ayer(set_id)
+            for espera in (60, 180, 300):
+                if not r or antes < 5 or len(r[1]) >= antes / 2:
+                    break
+                print(f"… {set_id}: {len(r[1])} precios (ayer {antes}); se reintenta en {espera} s")
+                time.sleep(espera)
+                r = expansion(set_id, serie)
+            else:
+                if r and antes >= 5 and len(r[1]) < antes / 2:
+                    raise Fallo(f"solo {len(r[1])} cartas con precio (ayer {antes})")
         except Fallo as e:
             fallos.append(f"{set_id}: {e}")
             print(f"✗ {set_id}: {e}")
