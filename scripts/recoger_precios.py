@@ -12,7 +12,8 @@ general de Cardmarket, y publica tres cosas en la carpeta de datos (por defecto 
     {"updated": "...", "sets": {"30th": ["Celebración 30.º Aniversario", "me", "es"]},
      "cards": [["30th-001", "30th", "001", "Exeggcute", "Común", 0.05, 1], ...]}
                 # id, expansión, número, nombre, rareza, precio de hoy,
-                # imagen: 1 si TCGdex la tiene, la URL si se ha encontrado en otro sitio (ver imagenes.py), 0 si no hay
+                # imagen: 1 si TCGdex la tiene, la URL si se ha encontrado en otro sitio (ver imagenes.py; con "~"
+                # delante si es provisional), 0 si no hay
 
 Si una expansión falla (no se puede descargar tras varios intentos, o llega sin los precios que tenía ayer),
 esa expansión se queda con los datos del día anterior y el resto se publica. Si fallan demasiadas a la vez
@@ -271,7 +272,8 @@ def main():
         resueltas = {}
     for r in resultados.values():
         for fila in r[2]:
-            # En el índice: 1 si TCGdex tiene imagen, la URL si se ha encontrado en otro sitio, 0 si no hay.
+            # En el índice: 1 si TCGdex tiene imagen, la URL si se ha encontrado en otro sitio ("~" delante si es
+            # provisional, de otra versión de la carta), 0 si no hay.
             fila[6] = 1 if fila[0] in tiene_tcgdex else resueltas.get(fila[0], 0)
 
     # Lo que ha ido bien se publica; lo que ha fallado se queda con los datos del día anterior.

@@ -48,7 +48,7 @@ provisionales se vuelven a mirar cada día por si ya ha salido la buena.
 }
 ```
 
-Cada carta: id, expansión, número, nombre, rareza, precio de hoy e imagen: `1` si TCGdex la tiene, la URL si se ha encontrado en otro sitio, `0` si no hay ninguna.
+Cada carta: id, expansión, número, nombre, rareza, precio de hoy e imagen: `1` si TCGdex la tiene, la URL si se ha encontrado en otro sitio (con `~` delante si es provisional), `0` si no hay ninguna.
 `sets` da el nombre de cada expansión, su serie y el idioma de los datos (`en` si TCGdex no la tiene en español).
 
 Los precios son la tendencia general de Cardmarket (mezcla todos los idiomas y estados).

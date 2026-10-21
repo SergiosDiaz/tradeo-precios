@@ -127,7 +127,7 @@ def resolver(fichas, tiene_tcgdex, oficial, data_dir, hoy):
     """Pone imagen a las cartas de `fichas` ({set_id: ficha}) que TCGdex no tiene.
 
     tiene_tcgdex: ids de las cartas con imagen propia en TCGdex. oficial(set_id, número): URL de pokemon.com.
-    Devuelve {id: url pequeña} de las resueltas (para el índice de búsqueda)."""
+    Devuelve {id: url pequeña} de las resueltas, para el índice de búsqueda ("~" delante si es provisional)."""
     path = os.path.join(data_dir, "imagenes.json")
     try:
         guardado = json.load(open(path)).get("cards", {})
@@ -204,7 +204,7 @@ def resolver(fichas, tiene_tcgdex, oficial, data_dir, hoy):
             c["alts"] = previas or None
             if g.get("approx"):
                 c["approx"] = g["approx"]   # id de la carta de la que se toma la imagen
-            resueltas[c["id"]] = g["img"]
+            resueltas[c["id"]] = ("~" if g.get("approx") else "") + g["img"]
 
     # Fuera las que TCGdex ya tiene (las de expansiones que hoy han fallado se quedan para mañana).
     guardado = {k: v for k, v in guardado.items() if k not in tiene_tcgdex}
