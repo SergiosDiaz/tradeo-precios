@@ -4,11 +4,17 @@ Precios diarios de Cardmarket (vía [TCGdex](https://tcgdex.dev)) de **todas** l
 
 - Cada día de madrugada, [`precios.yml`](.github/workflows/precios.yml) ejecuta [`scripts/recoger_precios.py`](scripts/recoger_precios.py):
   recorre las 145 expansiones en español (unas 17.000 cartas, con pocas peticiones a la vez para no cargar TCGdex),
-  añade el precio del día de cada carta a su historial y genera el índice de búsqueda.
+  guarda la ficha de cada expansión, añade el precio del día de cada carta a su historial y genera el índice de búsqueda.
+- Primero lo descarga todo; solo si **no ha fallado nada** escribe y publica. Si una expansión o una carta no se puede
+  descargar tras varios intentos, el robot termina con error y los datos del día anterior se quedan como estaban.
 - Los datos se publican en la rama [`data`](https://github.com/SergiosDiaz/tradeo-precios/tree/data), que se reescribe cada día como un único commit: así el repositorio no crece guardando versiones antiguas.
 - Para lanzarlo a mano: pestaña **Actions → Precios diarios → Run workflow**.
 
 ## Archivos (rama `data`)
+
+`sets/<expansión>.json`: ficha completa de una expansión (nombre, logo, cartas con número, nombre, rareza, tipo, imágenes,
+ilustrador y precios de hoy), en el mismo formato que usan la app y la web. Así abrir un álbum por primera vez es
+descargar un solo archivo en vez de hacer cientos de peticiones a TCGdex.
 
 `history/<expansión>.json`: historial de precios de una expansión.
 
