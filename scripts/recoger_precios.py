@@ -19,7 +19,11 @@ Si una expansión falla (no se puede descargar tras varios intentos, o llega sin
 esa expansión se queda con los datos del día anterior y el resto se publica. Si fallan demasiadas a la vez
 (TCGdex caído), no escribe nada y termina con error.
 
-Uso:  python3 scripts/recoger_precios.py [carpeta de datos]
+Las expansiones que fallan se vuelven a intentar al final, tras una espera larga (a veces TCGdex tarda en volver a
+tener los precios de una expansión). Con --repaso solo se recogen las expansiones que hoy aún no se han actualizado
+(la segunda pasada de la tarde); las demás se quedan como están.
+
+Uso:  python3 scripts/recoger_precios.py [carpeta de datos] [--repaso]
 """
 import datetime as dt
 import json
@@ -37,10 +41,13 @@ import imagenes
 API = "https://api.tcgdex.net/v2"
 OFICIAL = "https://assets.pokemon.com/static-assets/content-assets/cms2-es-es/img/cards/web"
 UA = {"User-Agent": "tradeo-precios (https://github.com/SergiosDiaz/tradeo-precios)"}
-DATA = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "data")
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+REPASO = "--repaso" in sys.argv
+DATA = ARGS[0] if ARGS else os.path.join(os.path.dirname(__file__), "..", "data")
 WORKERS = 8      # pocas peticiones a la vez: TCGdex es un servicio gratuito y comunitario
 SET_VERSION = 6  # versión del formato de sets/<expansión>.json (la misma que espera la app)
 MAX_FALLOS = 0.2 # si falla más de esta parte de las expansiones, TCGdex debe de estar caído: no se publica nada
+ESPERA_FINAL = 900  # segundos antes de reintentar al final las expansiones que han fallado
 
 RAREZAS = {
     "Common": "Común", "Uncommon": "Infrecuente", "Rare": "Rara", "Rare Holo": "Rara Holo",
@@ -181,6 +188,14 @@ def precios_de_ayer(set_id):
         return 0
 
 
+def actualizada_hoy(set_id, hoy):
+    """Si el historial de la expansión ya tiene el día de hoy (para el repaso de la tarde)."""
+    try:
+        return hoy in json.load(open(os.path.join(DATA, "history", f"{set_id}.json"))).get("dates", [])
+    except (OSError, ValueError):
+        return False
+
+
 def historial(set_id, hoy, latest):
     path = os.path.join(DATA, "history", f"{set_id}.json")
     data = json.load(open(path)) if os.path.exists(path) else {"set": set_id, "dates": [], "cards": {}}
@@ -229,36 +244,53 @@ def main():
     sets_ayer, filas_ayer = indice_anterior()
 
     # Primero se descarga todo en memoria y después se escribe.
-    resultados, fallos = {}, {}
-    for set_id, serie in expansiones:
+    resultados, fallos, al_dia = {}, {}, set()
+
+    def recoger(set_id, serie, esperas):
+        """Descarga una expansión. TCGdex a veces la devuelve a medio actualizar, sin precios: si ayer tenía
+        precios y hoy faltan más de la mitad, se reintenta tras cada espera; si sigue igual, es un fallo."""
         try:
             r = expansion(set_id, serie)
             if not r and set_id in sets_ayer:
                 raise Fallo("TCGdex no devuelve ninguna carta")
-            # TCGdex a veces devuelve una expansión a medio actualizar, sin precios. Si ayer tenía precios
-            # y hoy faltan más de la mitad, se reintenta; si sigue igual, cuenta como fallo.
             antes = precios_de_ayer(set_id)
-            for espera in (60, 180, 300):
+            for espera in esperas:
                 if not r or antes < 5 or len(r[1]) >= antes / 2:
                     break
                 print(f"… {set_id}: {len(r[1])} precios (ayer {antes}); se reintenta en {espera} s")
                 time.sleep(espera)
                 r = expansion(set_id, serie)
-            else:
-                if r and antes >= 5 and len(r[1]) < antes / 2:
-                    raise Fallo(f"solo {len(r[1])} cartas con precio (ayer {antes})")
+            if r and antes >= 5 and len(r[1]) < antes / 2:
+                raise Fallo(f"solo {len(r[1])} cartas con precio (ayer {antes})")
         except Fallo as e:
             fallos[set_id] = str(e)
             print(f"✗ {set_id}: {e}")
-            continue
+            return
+        fallos.pop(set_id, None)
         if not r:
             print(f"{set_id}: sin cartas en TCGdex")
-            continue
+            return
         resultados[set_id] = r
         print(f"{set_id} ({r[3]}): {len(r[1])}/{len(r[0]['cards'])} con precio")
 
+    for set_id, serie in expansiones:
+        if REPASO and actualizada_hoy(set_id, hoy):
+            al_dia.add(set_id)
+            continue
+        recoger(set_id, serie, (60, 180))
+
+    # Las que han fallado se reintentan al final, con más margen.
+    if fallos and len(fallos) <= len(expansiones) * MAX_FALLOS:
+        pendientes = [(s, serie) for s, serie in expansiones if s in fallos]
+        print(f"\n{len(pendientes)} expansiones con fallos: se reintentan en {ESPERA_FINAL} s")
+        time.sleep(ESPERA_FINAL)
+        for set_id, serie in pendientes:
+            recoger(set_id, serie, (120, 300))
+    if REPASO:
+        print(f"Repaso: {len(al_dia)} expansiones ya estaban al día, {len(expansiones) - len(al_dia)} recogidas de nuevo")
+
     # Si falla mucho a la vez, lo más probable es que TCGdex esté caído: mejor no tocar nada.
-    if len(fallos) > len(expansiones) * MAX_FALLOS:
+    if len(fallos) > (len(expansiones) - len(al_dia)) * MAX_FALLOS and not (REPASO and len(fallos) <= 3):
         print(f"\n{len(fallos)} de {len(expansiones)} expansiones con errores: no se publica nada hoy.")
         sys.exit(1)
 
@@ -286,6 +318,10 @@ def main():
                 escribir(os.path.join(DATA, "history", f"{set_id}.json"), historial(set_id, hoy, latest))
             index_sets[set_id] = [ficha_set["name"], ficha_set["serie"], lang]
             index_cards += index
+        elif set_id in al_dia and set_id in sets_ayer:
+            # Repaso: ya se publicó hoy por la mañana.
+            index_sets[set_id] = sets_ayer[set_id]
+            index_cards += filas_ayer.get(set_id, [])
         elif set_id in fallos:
             if set_id in sets_ayer:
                 index_sets[set_id] = sets_ayer[set_id]
