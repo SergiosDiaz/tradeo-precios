@@ -161,21 +161,10 @@ def expansion(set_id, serie):
     briefs = info["cards"]
 
     def ficha(b):
-        d = get(f"{API}/{lang}/cards/{urllib.parse.quote(b['id'])}")
-        # A veces el servidor de TCGdex que responde aún no tiene los precios de la carta en español:
-        # el precio de Cardmarket es el mismo producto, así que se toma de la versión en inglés.
-        if lang != "en" and mercado(d or b)[0][0] is None:
-            en = get(f"{API}/en/cards/{urllib.parse.quote(b['id'])}")
-            if en and mercado(en)[0][0] is not None:
-                d = {**(d or b), "pricing": en.get("pricing"), "variants_detailed": en.get("variants_detailed")}
-                usadas_en.append(b["id"])
-        return b, d
+        return b, get(f"{API}/{lang}/cards/{urllib.parse.quote(b['id'])}")
 
-    usadas_en = []
     with ThreadPoolExecutor(WORKERS) as ex:
         fichas = list(ex.map(ficha, briefs))   # si una carta falla, Fallo se propaga y se aborta todo
-    if usadas_en:
-        print(f"  {set_id}: {len(usadas_en)} precios tomados de la versión en inglés")
     if briefs and not any(mercado(d or b)[0][0] is not None for b, d in fichas):
         diagnostico(briefs[0]["id"])
     cards, latest, index = [], {}, []
