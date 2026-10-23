@@ -30,6 +30,19 @@ jobs:
             git archive FETCH_HEAD | tar -x -C data
           fi
 
+      # TCGdex tiene un servidor en Europa y otro en América, y el DNS te manda al más cercano. El de América
+      # va atrasado (por ejemplo, no tiene los precios de las expansiones más nuevas), así que el robot usa
+      # siempre el europeo, el mismo que usan la app y la web desde España. Su dirección se consulta en cada
+      # ejecución; si no se puede, se usa la normal.
+      - name: Usar el servidor europeo de TCGdex
+        run: |
+          ip=$(dig @8.8.8.8 api.tcgdex.net +short +subnet=88.0.0.0/24 | grep -E '^[0-9.]+$' | head -1)
+          if [ -n "$ip" ]; then
+            echo "$ip api.tcgdex.net" | sudo tee -a /etc/hosts
+          else
+            echo "::warning::no se pudo consultar el servidor europeo de TCGdex; se usa el normal"
+          fi
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
