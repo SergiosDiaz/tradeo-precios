@@ -43,11 +43,13 @@ OFICIAL = "https://assets.pokemon.com/static-assets/content-assets/cms2-es-es/im
 UA = {"User-Agent": "tradeo-precios (https://github.com/SergiosDiaz/tradeo-precios)"}
 ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 REPASO = "--repaso" in sys.argv
+# Solo estas expansiones (prueba rápida); las demás se quedan como están.
+SOLO = {s for s in os.environ.get("SOLO", "").replace(" ", "").split(",") if s}
 DATA = ARGS[0] if ARGS else os.path.join(os.path.dirname(__file__), "..", "data")
 WORKERS = 8      # pocas peticiones a la vez: TCGdex es un servicio gratuito y comunitario
 SET_VERSION = 6  # versión del formato de sets/<expansión>.json (la misma que espera la app)
 MAX_FALLOS = 0.2 # si falla más de esta parte de las expansiones, TCGdex debe de estar caído: no se publica nada
-ESPERA_FINAL = 900  # segundos antes de reintentar al final las expansiones que han fallado
+ESPERA_FINAL = 60 if os.environ.get("SOLO") else 900  # segundos antes de reintentar al final las expansiones que han fallado
 
 RAREZAS = {
     "Common": "Común", "Uncommon": "Infrecuente", "Rare": "Rara", "Rare Holo": "Rara Holo",
@@ -162,10 +164,10 @@ def expansion(set_id, serie):
         d = get(f"{API}/{lang}/cards/{urllib.parse.quote(b['id'])}")
         # A veces el servidor de TCGdex que responde aún no tiene los precios de la carta en español:
         # el precio de Cardmarket es el mismo producto, así que se toma de la versión en inglés.
-        if lang != "en" and d and mercado(d)[0][0] is None:
+        if lang != "en" and mercado(d or b)[0][0] is None:
             en = get(f"{API}/en/cards/{urllib.parse.quote(b['id'])}")
             if en and mercado(en)[0][0] is not None:
-                d = {**d, "pricing": en.get("pricing"), "variants_detailed": en.get("variants_detailed")}
+                d = {**(d or b), "pricing": en.get("pricing"), "variants_detailed": en.get("variants_detailed")}
                 usadas_en.append(b["id"])
         return b, d
 
@@ -174,6 +176,8 @@ def expansion(set_id, serie):
         fichas = list(ex.map(ficha, briefs))   # si una carta falla, Fallo se propaga y se aborta todo
     if usadas_en:
         print(f"  {set_id}: {len(usadas_en)} precios tomados de la versión en inglés")
+    if briefs and not any(mercado(d or b)[0][0] is not None for b, d in fichas):
+        diagnostico(briefs[0]["id"])
     cards, latest, index = [], {}, []
     for brief, d in fichas:
         c, p = carta(d or brief, set_id, serie, lang)
@@ -188,6 +192,22 @@ def expansion(set_id, serie):
         "at": time.time(), "v": SET_VERSION,
     }
     return ficha_set, latest, index, lang
+
+
+def diagnostico(card_id):
+    """Qué responde TCGdex para una carta que llega sin precio (para entender los fallos en GitHub)."""
+    for lang in ("es", "en"):
+        url = f"{API}/{lang}/cards/{urllib.parse.quote(card_id)}"
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=60) as r:
+                d = json.load(r)
+                cabeceras = {k: v for k, v in r.headers.items() if k.lower() in ("server", "via", "x-served-by", "cf-ray", "age", "date")}
+            print(f"  diagnóstico {lang} {card_id}: HTTP 200, claves={sorted(d.keys())[:12]}, "
+                  f"pricing={json.dumps(d.get('pricing'))[:200]}, cabeceras={cabeceras}")
+        except urllib.error.HTTPError as e:
+            print(f"  diagnóstico {lang} {card_id}: HTTP {e.code}")
+        except Exception as e:
+            print(f"  diagnóstico {lang} {card_id}: {e}")
 
 
 def precios_de_ayer(set_id):
@@ -285,7 +305,7 @@ def main():
         print(f"{set_id} ({r[3]}): {len(r[1])}/{len(r[0]['cards'])} con precio")
 
     for set_id, serie in expansiones:
-        if REPASO and actualizada_hoy(set_id, hoy):
+        if (REPASO and actualizada_hoy(set_id, hoy)) or (SOLO and set_id not in SOLO):
             al_dia.add(set_id)
             continue
         recoger(set_id, serie, (60, 180))

@@ -4,7 +4,12 @@ on:
   schedule:
     - cron: "17 2 * * *"   # todos los días a las 02:17 UTC (de madrugada en España)
     - cron: "17 14 * * *"  # repaso por la tarde: solo las expansiones que por la mañana no se pudieron actualizar
-  workflow_dispatch: {}      # también se puede lanzar a mano desde la pestaña Actions
+  workflow_dispatch:         # también se puede lanzar a mano desde la pestaña Actions
+    inputs:
+      solo:
+        description: "Solo estas expansiones, separadas por comas (vacío = todas)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -30,6 +35,8 @@ jobs:
           python-version: "3.12"
 
       - name: Recoger precios de todas las cartas (TCGdex) e índice de búsqueda
+        env:
+          SOLO: ${{ github.event.inputs.solo }}
         run: python3 scripts/recoger_precios.py data ${{ github.event.schedule == '17 14 * * *' && '--repaso' || '' }}
 
       - name: Publicar en la rama data (un solo commit, sin versiones antiguas)
