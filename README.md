@@ -58,7 +58,12 @@ Son las que TCGdex tiene en japonés (las nuevas, como «ストームエメラ�
 Llevan `ja-` delante del id de TCGdex, también sus cartas (`ja-M6`, `ja-M6-001`), para no chocar con las de aquí
 (TCGdex usa `neo1` en los dos idiomas, y `SM9`/`sm9` serían el mismo archivo en un disco que no distingue mayúsculas).
 
-Los nombres vienen en japonés. Para poder buscarlas, cada carta de Pokémon lleva en su ficha (`alias`) y como 8.º
+Cada expansión japonesa lleva su nombre de aquí (en inglés, como se conoce fuera: «Storm Emeralda», «Mega Dream ex»;
+el japonés se queda en `nameJa`). Salen de [Limitless](https://limitlesstcg.com/cards/jp), que tiene las japonesas con el
+mismo código que TCGdex; las antiguas y las de promos, de una tabla en el script. Se publican en `index/nombres_ja.json`
+(`sets`: código → nombre; `series`: serie → nombre de aquí), que también usa la app.
+
+Los nombres de las cartas vienen en japonés. Para poder buscarlas, cada carta de Pokémon lleva en su ficha (`alias`) y como 8.º
 campo del índice el nombre en español de su Pokémon («ヘラクロス» → «Heracross», «ヒートロトムex» → «Rotom ex»).
 Sale de `index/pokedex.json` (número de la Pokédex → nombre en español), que el robot rellena con las cartas en español.
 

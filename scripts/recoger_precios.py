@@ -33,6 +33,7 @@ tener los precios de una expansión). Con --repaso solo se recogen las expansion
 Uso:  python3 scripts/recoger_precios.py [carpeta de datos] [--repaso]
 """
 import datetime as dt
+import html
 import json
 import os
 import re
@@ -75,6 +76,47 @@ RAREZAS = {
 
 # Número de la Pokédex -> nombre en español (lo más corto visto: "Pikachu" antes que "Pikachu ex").
 POKEDEX = {}
+# Código de TCGdex -> nombre de aquí de las expansiones japonesas (se rellena al empezar).
+NOMBRES_JA = {}
+
+# Nombre occidental de las expansiones japonesas. Las modernas salen de Limitless (lista de expansiones japonesas
+# con su nombre en inglés y el mismo código que TCGdex); las antiguas y las de promos, de esta tabla.
+LIMITLESS_JP = "https://limitlesstcg.com/cards/jp"
+NOMBRES_JA_FIJOS = {
+    "PMCG1": "Expansion Pack", "PMCG2": "Pokémon Jungle", "PMCG3": "Mystery of the Fossils", "PMCG4": "Rocket Gang",
+    "PMCG5": "Leaders' Stadium", "PMCG6": "Challenge from the Darkness",
+    "neo1": "Gold, Silver, to a New World...", "neo2": "Crossing the Ruins...", "neo3": "Awakening Legends",
+    "neo4": "Darkness, and to Light...", "VS1": "Pokémon Card ★VS", "web1": "Pokémon Card ★web",
+    "E1": "Base Expansion Pack", "E2": "The Town on No Map", "E3": "Wind from the Sea", "E4": "Split Earth",
+    "E5": "Mysterious Mountains",
+    "PCG1": "Flight of Legends", "PCG2": "Clash of the Blue Sky", "PCG3": "Rocket Gang Strikes Back",
+    "PCG4": "Golden Sky, Silvery Ocean", "PCG5": "Mirage Forest", "PCG6": "Holon Research Tower", "PCG7": "Holon Phantom",
+    "PCG8": "Miracle Crystal", "PCG9": "Offense and Defense of the Furthest Ends",
+    "SV-P": "Scarlet & Violet Promos", "M-P": "MEGA Promos",
+}
+# Series japonesas con su nombre de aquí.
+SERIES_JA = {
+    "PMCG": "Pokémon Card Game (original)", "neo": "Neo", "VS": "VS", "web": "web", "e": "e-Card", "ADV": "ADV",
+    "PCG": "PCG", "L": "LEGEND", "XY": "XY", "XYb": "XY BREAK", "SM": "Sol y Luna", "S": "Espada y Escudo",
+    "M": "Megaevolución", "SV": "Escarlata y Púrpura",
+}
+
+
+def nombres_japonesas(anteriores):
+    """{código de TCGdex: nombre en inglés} de las expansiones japonesas. Si Limitless no responde, los de ayer."""
+    nombres = dict(anteriores)
+    try:
+        req = urllib.request.Request(LIMITLESS_JP, headers={**UA, "User-Agent": "Mozilla/5.0 (tradeo-precios)"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            pagina = r.read().decode("utf-8", "ignore")
+        for code, dentro in re.findall(r'href="/cards/jp/([A-Za-z0-9\-]+)"[^>]*>(.*?)</a>', pagina, re.S):
+            texto = html.unescape(" ".join(re.sub(r"<[^>]+>", " ", dentro).split()))
+            if texto.endswith(" " + code):   # «Storm Emeralda M6»: el nombre y el código
+                nombres[code] = texto[: -len(code) - 1].strip()
+    except Exception as e:
+        print(f"::warning title=nombres::no se pudo leer Limitless ({e}); se usan los nombres de ayer")
+    nombres.update(NOMBRES_JA_FIJOS)
+    return nombres
 
 
 def es_japonesa(set_id):
@@ -232,11 +274,16 @@ def expansion(set_id, serie):
             fila.append(c["alias"])
         index.append(fila)
     cards.sort(key=orden)
+    nombre = info.get("name", set_id)
+    if japonesa and NOMBRES_JA.get(tcg_id):
+        nombre = NOMBRES_JA[tcg_id]   # el de aquí; el japonés se queda en nameJa
     ficha_set = {
-        "id": set_id, "name": info.get("name", set_id), "serie": serie, "logo": info.get("logo"),
+        "id": set_id, "name": nombre, "serie": serie, "logo": info.get("logo"),
         "official": (info.get("cardCount") or {}).get("official", 0), "lang": lang, "cards": cards,
         "at": time.time(), "v": SET_VERSION,
     }
+    if japonesa:
+        ficha_set["nameJa"] = info.get("name", set_id)
     return ficha_set, latest, index, lang
 
 
@@ -323,6 +370,12 @@ def main():
     expansiones += [(JAPON + x["id"], sid) for sid in series_ja
                     for x in (get(f"{API}/ja/series/{urllib.parse.quote(sid)}") or {}).get("sets", [])]
     sets_ayer, filas_ayer = indice_anterior()
+    nombres_path = os.path.join(DATA, "index", "nombres_ja.json")
+    try:
+        anteriores = json.load(open(nombres_path)).get("sets", {})
+    except (OSError, ValueError):
+        anteriores = {}
+    NOMBRES_JA.update(nombres_japonesas(anteriores))
     pokedex_path = os.path.join(DATA, "index", "pokedex.json")
     try:
         POKEDEX.update(json.load(open(pokedex_path)))
@@ -416,7 +469,12 @@ def main():
             else:
                 aviso = "aún no tenía datos publicados, hoy no se publica"
             print(f"::warning title={set_id}::{fallos[set_id]}: {aviso}")   # aviso visible en GitHub Actions
+    # Las japonesas, con su nombre de aquí (también las que hoy no se han recogido y vienen de ayer).
+    for set_id, fila in index_sets.items():
+        if es_japonesa(set_id) and NOMBRES_JA.get(set_id[len(JAPON):]):
+            index_sets[set_id] = [NOMBRES_JA[set_id[len(JAPON):]]] + list(fila[1:])
     escribir(os.path.join(DATA, "index", "cards.json"), {"updated": hoy, "sets": index_sets, "cards": index_cards})
+    escribir(nombres_path, {"sets": NOMBRES_JA, "series": SERIES_JA})
     escribir(pokedex_path, POKEDEX)
     print(f"\n{len(index_sets)} expansiones ({len(fallos)} con los datos del día anterior), "
           f"{len(index_cards)} cartas en {time.time() - inicio:.0f} s")
