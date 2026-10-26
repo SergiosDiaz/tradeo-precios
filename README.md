@@ -1,9 +1,9 @@
 # tradeo-precios
 
-Precios diarios de Cardmarket (vía [TCGdex](https://tcgdex.dev)) de **todas** las cartas Pokémon TCG en español, para la app **Tradeo** y la web del álbum.
+Precios diarios de Cardmarket (vía [TCGdex](https://tcgdex.dev)) de **todas** las cartas Pokémon TCG en español y en japonés, para la app **Tradeo** y la web del álbum.
 
 - Cada día de madrugada, [`precios.yml`](.github/workflows/precios.yml) ejecuta [`scripts/recoger_precios.py`](scripts/recoger_precios.py):
-  recorre las 145 expansiones en español (unas 17.000 cartas, con pocas peticiones a la vez para no cargar TCGdex),
+  recorre las expansiones en español (unas 150, 17.000 cartas) y después las japonesas (unas 190, 18.000 cartas), con pocas peticiones a la vez para no cargar TCGdex,
   guarda la ficha de cada expansión, añade el precio del día de cada carta a su historial y genera el índice de búsqueda.
 - Primero lo descarga todo y después publica **lo que ha ido bien**. Si una expansión falla (no se puede descargar tras
   varios intentos, o llega sin los precios que tenía ayer porque TCGdex la sirve a medio actualizar), esa expansión se
@@ -50,6 +50,19 @@ de verdad las imágenes que TCGdex dice tener; las que no, se buscan igual que l
 ```
 
 Cada carta: id, expansión, número, nombre, rareza, precio de hoy e imagen: `1` si TCGdex la tiene, la URL si se ha encontrado en otro sitio (con `~` delante si es provisional), `0` si no hay ninguna.
-`sets` da el nombre de cada expansión, su serie y el idioma de los datos (`en` si TCGdex no la tiene en español).
+`sets` da el nombre de cada expansión, su serie y el idioma de los datos (`en` si TCGdex no la tiene en español, `ja` en las japonesas).
+
+## Expansiones japonesas
+
+Son las que TCGdex tiene en japonés (las nuevas, como «ストームエメラルダ», entran solas en cuanto TCGdex las publica).
+Llevan `ja-` delante del id de TCGdex, también sus cartas (`ja-M6`, `ja-M6-001`), para no chocar con las de aquí
+(TCGdex usa `neo1` en los dos idiomas, y `SM9`/`sm9` serían el mismo archivo en un disco que no distingue mayúsculas).
+
+Los nombres vienen en japonés. Para poder buscarlas, cada carta de Pokémon lleva en su ficha (`alias`) y como 8.º
+campo del índice el nombre en español de su Pokémon («ヘラクロス» → «Heracross», «ヒートロトムex» → «Rotom ex»).
+Sale de `index/pokedex.json` (número de la Pokédex → nombre en español), que el robot rellena con las cartas en español.
+
+Las imágenes son las de TCGdex en japonés; si TCGdex aún no la tiene (expansiones recién salidas), la de otra versión
+japonesa de la misma carta, marcada como provisional.
 
 Los precios son la tendencia general de Cardmarket (mezcla todos los idiomas y estados).

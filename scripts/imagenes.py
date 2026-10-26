@@ -57,6 +57,8 @@ def num_limitless(set_id, num):
 def candidatos(c, set_lang, serie, oficial):
     """Imágenes exactas de la carta, de mejor a peor: [(pequeña, grande), …]."""
     out = []
+    if set_lang == "ja":
+        return out   # japonesas: solo TCGdex (si no la tiene, otra versión de la misma carta japonesa)
     if set_lang == "es" and oficial:
         out.append((oficial, oficial))
     code = LIMITLESS_SETS.get(c["set"])
@@ -196,7 +198,7 @@ def resolver(fichas, tiene_tcgdex, oficial, data_dir, hoy):
             o = otras[-1][1]
             guardado[c["id"]] = {"img": o["img"], "hi": o.get("imgHi") or o["img"], "approx": o["id"], "nombre": c["name"].lower(), "fecha": hoy}
             continue
-        hit = ptcg.por_nombre(c["name"])
+        hit = ptcg.por_nombre(c["name"]) if ficha.get("lang") != "ja" else None
         if hit and existe(hit[0]):
             guardado[c["id"]] = {"img": hit[0], "hi": hit[1], "approx": hit[2], "nombre": c["name"].lower(), "fecha": hoy}
             continue

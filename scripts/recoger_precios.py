@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Recoge cada día de TCGdex todas las cartas de todas las expansiones publicadas en España, con el precio
-general de Cardmarket, y publica tres cosas en la carpeta de datos (por defecto ./data, en GitHub la rama `data`):
+"""Recoge cada día de TCGdex todas las cartas de todas las expansiones publicadas en España y en Japón, con el
+precio general de Cardmarket, y publica tres cosas en la carpeta de datos (por defecto ./data, en GitHub la rama `data`):
 
 - sets/<expansión>.json      ficha completa de la expansión (cartas, nombres, rarezas, imágenes, precios de hoy),
                              en el mismo formato que usan la app y la web: así abren un álbum con un solo archivo.
@@ -14,6 +14,13 @@ general de Cardmarket, y publica tres cosas en la carpeta de datos (por defecto 
                 # id, expansión, número, nombre, rareza, precio de hoy,
                 # imagen: 1 si TCGdex la tiene, la URL si se ha encontrado en otro sitio (ver imagenes.py; con "~"
                 # delante si es provisional), 0 si no hay
+                # y, solo en las japonesas, un 8.º campo: el nombre en español del Pokémon (para buscarlas)
+
+Las expansiones japonesas (las que TCGdex tiene en japonés) llevan "ja-" delante del id de TCGdex, también sus
+cartas ("ja-M6", "ja-M6-001"): así no chocan con las de aquí (TCGdex usa "neo1" en los dos idiomas, y "SM9"/"sm9"
+serían el mismo archivo en un disco que no distingue mayúsculas). En el índice su idioma es "ja". Para poder buscarlas
+sin saber japonés, cada carta de Pokémon lleva el nombre en español de su especie (de index/pokedex.json, que se
+rellena con las cartas en español: número de la Pokédex -> nombre).
 
 Si una expansión falla (no se puede descargar tras varios intentos, o llega sin los precios que tenía ayer),
 esa expansión se queda con los datos del día anterior y el resto se publica. Si fallan demasiadas a la vez
@@ -50,6 +57,7 @@ WORKERS = 8      # pocas peticiones a la vez: TCGdex es un servicio gratuito y c
 SET_VERSION = 6  # versión del formato de sets/<expansión>.json (la misma que espera la app)
 MAX_FALLOS = 0.2 # si falla más de esta parte de las expansiones, TCGdex debe de estar caído: no se publica nada
 ESPERA_FINAL = 60 if os.environ.get("SOLO") else 900  # segundos antes de reintentar al final las expansiones que han fallado
+JAPON = "ja-"    # delante de los ids de las expansiones y cartas japonesas
 
 RAREZAS = {
     "Common": "Común", "Uncommon": "Infrecuente", "Rare": "Rara", "Rare Holo": "Rara Holo",
@@ -57,7 +65,41 @@ RAREZAS = {
     "Special illustration rare": "Rara Ilustración Especial", "Hyper rare": "Rara Híper",
     "Secret Rare": "Rara Secreta", "Pikachu Rare": "Rara Pikachu", "RGB Rare": "Rara RGB",
     "Futuristic Rare": "Rara Futurista", "None": "—", "Ninguno": "—",
+    # Las que solo hay en Japón.
+    "Art Rare": "Rara Ilustración", "Special Art Rare": "Rara Ilustración Especial", "Super Rare": "Súper Rara",
+    "Character Rare": "Rara Personaje", "Character Super Rare": "Súper Rara Personaje", "Shiny Rare": "Rara Variocolor",
+    "Shiny Super Rare": "Súper Rara Variocolor", "Shiny Ultra Rare": "Ultra Rara Variocolor", "Mega Hyper Rare": "Rara Híper Mega",
+    "Black White Rare": "Rara Blanco y Negro", "Ace Spec Rare": "AS TÁCTICO", "Amazing Rare": "Rara Asombrosa",
+    "Crown": "Corona", "Rare Holo LV.X": "Rara Holo LV.X", "Rare PRIME": "Rara PRIME", "LEGEND": "LEYENDA",
 }
+
+# Número de la Pokédex -> nombre en español (lo más corto visto: "Pikachu" antes que "Pikachu ex").
+POKEDEX = {}
+
+
+def es_japonesa(set_id):
+    return set_id.startswith(JAPON)
+
+
+def anotar_pokedex(d):
+    """Con una carta en español, apunta el nombre de su Pokémon (solo si es de una sola especie)."""
+    dex = d.get("dexId") or []
+    nombre = (d.get("name") or "").strip()
+    if len(dex) == 1 and nombre:
+        k = str(dex[0])
+        if k not in POKEDEX or len(nombre) < len(POKEDEX[k]):
+            POKEDEX[k] = nombre
+
+
+def alias_espanol(d):
+    """Nombre en español para buscar una carta japonesa: su Pokémon («Pikachu») y lo que lleve en letras latinas
+    («ex», «V», «VMAX»…), con «Mega» si es una megaevolución. Vacío si no es un Pokémon conocido."""
+    nombres = [POKEDEX[str(n)] for n in d.get("dexId") or [] if str(n) in POKEDEX]
+    if not nombres:
+        return ""
+    nombre = d.get("name") or ""
+    extra = [w for w in re.findall(r"[A-Za-z][A-Za-z.]*", nombre) if w.lower() not in {n.lower() for n in nombres}]
+    return " ".join((["Mega"] if nombre.startswith("メガ") else []) + nombres + extra)
 TIPOS = {
     "Grass": "Planta", "Fire": "Fuego", "Water": "Agua", "Lightning": "Rayo", "Psychic": "Psíquica",
     "Fighting": "Lucha", "Darkness": "Oscura", "Metal": "Metálica", "Dragon": "Dragón",
@@ -117,6 +159,7 @@ def imagen_oficial(set_id, local):
 def carta(d, set_id, serie, lang):
     """Carta en el formato de la app y la web."""
     local = d.get("localId", "")
+    japonesa = es_japonesa(set_id)
     types = d.get("types") or []
     cat = d.get("category") or ""
     if types:
@@ -127,19 +170,27 @@ def carta(d, set_id, serie, lang):
         tipo = "Energía"
     else:
         tipo = "Incolora"
-    base = d.get("image") or (f"https://assets.tcgdex.net/en/{serie}/{set_id}/{local}" if serie else None)
+    # Japonesas: solo la imagen de TCGdex (si no la tiene, la busca imagenes.py).
+    base = d.get("image") or (f"https://assets.tcgdex.net/en/{serie}/{set_id}/{local}" if serie and not japonesa else None)
     official = imagen_oficial(set_id, local) if lang == "es" else None
     alts = [a for a in [official if base else None,
                         base.replace("/es/", "/en/") + "/low.webp" if base and "/es/" in base else None] if a]
     precios, cm = mercado(d)
     rareza = d.get("rarity")
-    return {
-        "id": d["id"], "num": local, "name": d.get("name", ""),
+    ficha = {
+        "id": (JAPON if japonesa else "") + d["id"], "num": local, "name": d.get("name", ""),
         "rarity": RAREZAS.get(rareza, rareza) if rareza else "—", "type": tipo, "set": set_id,
         "img": base + "/low.webp" if base else official, "imgHi": base + "/high.webp" if base else official,
         "alts": alts or None, "price": precios[0], "p1": precios[1], "p7": precios[2], "p30": precios[3],
         "cm": cm, "artist": d.get("illustrator"),
-    }, precios
+    }
+    if japonesa:
+        alias = alias_espanol(d)
+        if alias:
+            ficha["alias"] = alias
+    else:
+        anotar_pokedex(d)
+    return ficha, precios
 
 
 def orden(c):
@@ -151,9 +202,12 @@ def orden(c):
 
 
 def expansion(set_id, serie):
-    """Ficha completa de una expansión (en español; si TCGdex no la tiene en español, en inglés)."""
-    for lang in ("es", "en"):
-        info = get(f"{API}/{lang}/sets/{urllib.parse.quote(set_id)}")
+    """Ficha completa de una expansión (en español; si TCGdex no la tiene en español, en inglés).
+    Las japonesas ("ja-…"), en japonés."""
+    japonesa = es_japonesa(set_id)
+    tcg_id = set_id[len(JAPON):] if japonesa else set_id
+    for lang in (("ja",) if japonesa else ("es", "en")):
+        info = get(f"{API}/{lang}/sets/{urllib.parse.quote(tcg_id)}")
         if info and info.get("cards"):
             break
     else:
@@ -165,7 +219,7 @@ def expansion(set_id, serie):
 
     with ThreadPoolExecutor(WORKERS) as ex:
         fichas = list(ex.map(ficha, briefs))   # si una carta falla, Fallo se propaga y se aborta todo
-    if briefs and not any(mercado(d or b)[0][0] is not None for b, d in fichas):
+    if briefs and not japonesa and not any(mercado(d or b)[0][0] is not None for b, d in fichas):
         diagnostico(briefs[0]["id"])
     cards, latest, index = [], {}, []
     for brief, d in fichas:
@@ -173,7 +227,10 @@ def expansion(set_id, serie):
         cards.append(c)
         if p[0] is not None:
             latest[c["id"]] = p
-        index.append([c["id"], set_id, c["num"], c["name"], c["rarity"], p[0], 1 if brief.get("image") else 0])
+        fila = [c["id"], set_id, c["num"], c["name"], c["rarity"], p[0], 1 if brief.get("image") else 0]
+        if c.get("alias"):
+            fila.append(c["alias"])
+        index.append(fila)
     cards.sort(key=orden)
     ficha_set = {
         "id": set_id, "name": info.get("name", set_id), "serie": serie, "logo": info.get("logo"),
@@ -261,7 +318,16 @@ def main():
     inicio = time.time()
     series = [s["id"] for s in get(f"{API}/es/series") if s["id"] != "tcgp"]   # TCG Pocket es digital
     expansiones = [(x["id"], sid) for sid in series for x in (get(f"{API}/es/series/{sid}") or {}).get("sets", [])]
+    # Las japonesas, después: así ya se conoce el nombre en español de cada Pokémon.
+    series_ja = [s["id"] for s in get(f"{API}/ja/series") or []]
+    expansiones += [(JAPON + x["id"], sid) for sid in series_ja
+                    for x in (get(f"{API}/ja/series/{urllib.parse.quote(sid)}") or {}).get("sets", [])]
     sets_ayer, filas_ayer = indice_anterior()
+    pokedex_path = os.path.join(DATA, "index", "pokedex.json")
+    try:
+        POKEDEX.update(json.load(open(pokedex_path)))
+    except (OSError, ValueError):
+        pass
 
     # Primero se descarga todo en memoria y después se escribe.
     resultados, fallos, al_dia = {}, {}, set()
@@ -351,6 +417,7 @@ def main():
                 aviso = "aún no tenía datos publicados, hoy no se publica"
             print(f"::warning title={set_id}::{fallos[set_id]}: {aviso}")   # aviso visible en GitHub Actions
     escribir(os.path.join(DATA, "index", "cards.json"), {"updated": hoy, "sets": index_sets, "cards": index_cards})
+    escribir(pokedex_path, POKEDEX)
     print(f"\n{len(index_sets)} expansiones ({len(fallos)} con los datos del día anterior), "
           f"{len(index_cards)} cartas en {time.time() - inicio:.0f} s")
 
