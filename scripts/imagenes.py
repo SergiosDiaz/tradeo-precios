@@ -6,7 +6,8 @@ Se prueba, por orden, hasta encontrar una que exista:
   3. la de TCGdex en inglés
   4. Limitless en inglés
   5. pokemontcg.io (en inglés)
-  Las japonesas, en Limitless en japonés (tiene casi todas las de 2010 en adelante, y las promos).
+  Las japonesas, en Limitless en japonés (tiene casi todas las de 2010 en adelante, y las promos) y, si no, en
+  jp.pokellector.com (las primeras expansiones, Neo, VS y las secretas de SM/S que Limitless no tiene).
   6. último recurso: la imagen de otra versión de la misma carta (mismo nombre, otra expansión; si no hay
      ninguna, se busca por nombre en pokemontcg.io). La carta se marca con "approx" para que la app y la web
      avisen de que es provisional.
@@ -14,6 +15,7 @@ Se prueba, por orden, hasta encontrar una que exista:
 Lo encontrado se guarda en imagenes.json para no repetir la búsqueda cada día. Las provisionales y las que no
 tienen imagen se vuelven a mirar a diario por si ya ha salido la buena. Nada de esto hace fallar al robot.
 """
+import difflib
 import json
 import os
 import re
@@ -37,6 +39,29 @@ PTCG_SETS = {
     "svp": "svp", "2011bw": "mcd11", "2012bw": "mcd12", "2021swsh": "mcd21", "2022swsh": "mcd22",
     "cel25cc": "cel25c", "cel25": "cel25", "tk-ex-latia": "tk1a", "tk-ex-latio": "tk1b", "tk-ex-p": "tk2a",
     "tk-ex-m": "tk2b", "hgssp": "hsp", "xyp": "xyp", "bwp": "bwp", "exu": "ex10",
+}
+# Expansión japonesa de TCGdex -> página de jp.pokellector.com (https://jp.pokellector.com/<página>-Expansion/).
+POKELLECTOR_JP = {
+    "ja-PMCG1": "Expansion-Pack", "ja-PMCG2": "Pokemon-Jungle", "ja-PMCG3": "Mystery-of-the-Fossils",
+    "ja-PMCG4": "Rocket-Gang", "ja-PMCG5": "Leaders-Stadium", "ja-PMCG6": "Challenge-from-the-Darkness",
+    "ja-neo1": "Gold-Silver-to-a-New-World", "ja-neo2": "Crossing-the-Ruins", "ja-neo3": "Awakening-Legends",
+    "ja-neo4": "Darkness-and-to-Light", "ja-VS1": "Pokemon-VS", "ja-BW8a": "Thunder-Knuckle",
+    "ja-M6a": "30th-Celebration-Japanese",
+    "ja-SM1S": "Collection-Sun", "ja-SM1M": "Collection-Moon", "ja-SM1p": "Sun-Moon-Strengthening-Expansion",
+    "ja-SM2K": "Islands-Awaiting-You", "ja-SM2L": "Alola-Moonlight",
+    "ja-SM2p": "Strengthening-Expansion-Pack-Beyond-A-New-Challeng",
+    "ja-SM3H": "Seen-the-Rainbow-Battle", "ja-SM3N": "Light-Consuming-Darkness",
+    "ja-SM3p": "Strengthening-Expansion-Shining-Legends", "ja-SM4A": "The-Transdimensional-Beast",
+    "ja-SM4S": "The-Awoken-Hero", "ja-SM4p": "GX-Battle-Boost", "ja-SM5S": "Ultra-Sun", "ja-SM5M": "Ultra-Moon",
+    "ja-SM5p": "Ultra-Force", "ja-SM6": "Japanese-Forbidden-Light", "ja-SM6a": "Dragon-Storm",
+    "ja-SM6b": "Champion-Road", "ja-SM7": "Charisma-of-the-Cracked-Sky", "ja-SM7a": "Thunderclap-Spark",
+    "ja-SM7b": "Fairy-Rise", "ja-SM8": "Explosive-Impact", "ja-SM8a": "Dark-Order", "ja-SM8b": "Ultra-Shiny-GX",
+    "ja-SM9": "Tag-Bolt", "ja-SM9a": "Night-Unison", "ja-SM9b": "Full-Metal-Wall", "ja-SM10": "Double-Blaze",
+    "ja-SM10a": "GG-End", "ja-SM10b": "Sky-Legend", "ja-SM11": "Miracle-Twins", "ja-SM11a": "Remix-Bout",
+    "ja-SM11b": "Dream-League", "ja-SM12": "Alter-Genesis", "ja-SM12a": "Tag-Team-GX-All-Stars",
+    "ja-S5I": "Single-Strike-Master", "ja-S5R": "Rapid-Strike-Master", "ja-S6H": "Silver-Lance",
+    "ja-S6K": "Jet-Black-Spirit", "ja-S7D": "Towering-Perfection", "ja-S8": "Fusion-ARTS",
+    "ja-S8b": "VMAX-Climax", "ja-S12a": "VSTAR-Universe",
 }
 WORKERS = 8
 
@@ -131,6 +156,60 @@ class PokemonTCG:
         return None
 
 
+def _plano(texto):
+    return re.sub(r"[^a-z0-9]", "", (texto or "").lower())
+
+
+def mismo_nombre(alias, nombre):
+    """¿Es la misma carta? alias: nombre en inglés de TCGdex («Scyther R»); nombre: el de Pokellector
+    («Rockets-Scyther»). Sin alias (entrenadores y energías) vale el número."""
+    a, b = _plano(alias), _plano(nombre)
+    if not a:
+        return True
+    if a in b or b in a or difflib.SequenceMatcher(None, a, b).ratio() >= 0.8:
+        return True
+    primera = _plano(alias.split()[0])   # el Pokémon, con el dueño delante o detrás («Bugsy's Pinsir»)
+    return len(primera) >= 4 and primera in b
+
+
+class Pokellector:
+    """Imágenes de jp.pokellector.com para japonesas que no están en Limitless (una página por expansión)."""
+
+    def __init__(self):
+        self.sets = {}
+
+    def _cartas(self, set_id, todas):
+        """{número: [(nombre, url pequeña)]} de la expansión, o {} si su numeración no cuadra con la de TCGdex."""
+        if set_id in self.sets:
+            return self.sets[set_id]
+        self.sets[set_id] = {}
+        url = f"https://jp.pokellector.com/{POKELLECTOR_JP[set_id]}-Expansion/"
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=60) as r:
+                html = r.read().decode("utf-8", "replace")
+        except Exception:
+            return {}
+        cartas = {}
+        for m in re.finditer(r'https://den-cards\.pokellector\.com/\d+/([^"/]+?)\.[A-Za-z0-9+-]+\.([A-Za-z0-9]+)(?:\.\d+)?\.thumb\.png', html):
+            cartas.setdefault(m.group(2).lstrip("0") or "0", []).append((m.group(1), m.group(0)))
+        # Solo si casi todas las cartas con nombre en inglés coinciden en número y nombre (si no, es otra numeración).
+        con_alias = [c for c in todas if c.get("alias")]
+        iguales = sum(1 for c in con_alias
+                      if any(mismo_nombre(c["alias"], n) for n, _ in cartas.get(c["num"].lstrip("0") or "0", [])))
+        if con_alias and iguales / len(con_alias) >= 0.8:
+            self.sets[set_id] = cartas
+        else:
+            print(f"Pokellector: {set_id} no cuadra ({iguales}/{len(con_alias)}), no se usa")
+        return self.sets[set_id]
+
+    def buscar(self, c, todas):
+        if c["set"] not in POKELLECTOR_JP:
+            return None
+        hits = self._cartas(c["set"], todas).get(c["num"].lstrip("0") or "0", [])
+        url = next((u for n, u in hits if mismo_nombre(c.get("alias"), n)), None)
+        return (url, url.replace(".thumb.png", ".png")) if url else None
+
+
 def resolver(fichas, tiene_tcgdex, oficial, data_dir, hoy):
     """Pone imagen a las cartas de `fichas` ({set_id: ficha}) que TCGdex no tiene.
 
@@ -175,6 +254,7 @@ def resolver(fichas, tiene_tcgdex, oficial, data_dir, hoy):
             pendientes.append((ficha, c))
 
     ptcg = PokemonTCG()
+    pokellector = Pokellector()
 
     def exacta(item):
         ficha, c = item
@@ -191,6 +271,12 @@ def resolver(fichas, tiene_tcgdex, oficial, data_dir, hoy):
             hit = ptcg.buscar(c)
             if hit and existe(hit[0]):
                 exactas[c["id"]] = {"img": hit[0], "hi": hit[1]}
+    # Pokellector, también una página por expansión.
+    for ficha, c in pendientes:
+        if not exactas.get(c["id"]) and ficha.get("lang") == "ja":
+            hit = pokellector.buscar(c, ficha["cards"])
+            if hit and existe(hit[0]):
+                exactas[c["id"]] = {"img": hit[0], "hi": hit[1] if existe(hit[1]) else hit[0]}
 
     for ficha, c in pendientes:
         r = exactas.get(c["id"])
