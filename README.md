@@ -19,7 +19,7 @@ ilustrador y precios de hoy), en el mismo formato que usan la app y la web. Así
 descargar un solo archivo en vez de hacer cientos de peticiones a TCGdex.
 
 `imagenes.json`: imagen encontrada fuera de TCGdex para las cartas que TCGdex no tiene (ver [`scripts/imagenes.py`](scripts/imagenes.py)):
-oficial en español de pokemon.com, Limitless, TCGdex en inglés, pokemontcg.io o, como último recurso, la de otra
+oficial en español de pokemon.com, Limitless, TCGdex en inglés, pokemontcg.io (las japonesas, Limitless en japonés) o, como último recurso, la de otra
 versión de la misma carta (marcada como provisional con `approx`). Se guarda para no repetir la búsqueda; las
 provisionales se vuelven a mirar cada día por si ya ha salido la buena. También comprueba (una vez por carta) que existen
 de verdad las imágenes que TCGdex dice tener; las que no, se buscan igual que las demás.

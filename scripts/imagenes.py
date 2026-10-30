@@ -6,6 +6,7 @@ Se prueba, por orden, hasta encontrar una que exista:
   3. la de TCGdex en inglés
   4. Limitless en inglés
   5. pokemontcg.io (en inglés)
+  Las japonesas, en Limitless en japonés (tiene casi todas las de 2010 en adelante, y las promos).
   6. último recurso: la imagen de otra versión de la misma carta (mismo nombre, otra expansión; si no hay
      ninguna, se busca por nombre en pokemontcg.io). La carta se marca con "approx" para que la app y la web
      avisen de que es provisional.
@@ -24,6 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 UA = {"User-Agent": "tradeo-precios (https://github.com/SergiosDiaz/tradeo-precios)"}
 LIMITLESS = "https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/tpci"
+LIMITLESS_JP = "https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/tpc"
 PTCG_API = "https://api.pokemontcg.io/v2/cards"
 
 # Expansión de TCGdex -> código de Limitless (y cómo pasar el número: "SWSH251" -> "251").
@@ -58,7 +60,11 @@ def candidatos(c, set_lang, serie, oficial):
     """Imágenes exactas de la carta, de mejor a peor: [(pequeña, grande), …]."""
     out = []
     if set_lang == "ja":
-        return out   # japonesas: solo TCGdex (si no la tiene, otra versión de la misma carta japonesa)
+        # Limitless en japonés: el código de TCGdex sin «ja-» ni guiones («ja-SV-P» -> «SVP») y el número sin ceros.
+        code = c["set"].removeprefix("ja-").replace("-", "")
+        n = c["num"].lstrip("0") or "0"
+        out.append((f"{LIMITLESS_JP}/{code}/{code}_{n}_R_JP_SM.png", f"{LIMITLESS_JP}/{code}/{code}_{n}_R_JP_LG.png"))
+        return out   # si no, otra versión de la misma carta japonesa
     if set_lang == "es" and oficial:
         out.append((oficial, oficial))
     code = LIMITLESS_SETS.get(c["set"])
