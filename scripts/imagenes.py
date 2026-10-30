@@ -5,11 +5,12 @@ Se prueba, por orden, hasta encontrar una que exista:
   2. Limitless en español (promos y energías recientes)
   3. la de TCGdex en inglés
   4. Limitless en inglés
-  5. pokemontcg.io (en inglés)
+  5. pokemontcg.io (en inglés), leyendo sus datos abiertos de GitHub (PokemonTCG/pokemon-tcg-data): más rápido y
+     fiable que su API, que es lenta y a veces falla.
   Las japonesas, en Limitless en japonés (tiene casi todas las de 2010 en adelante, y las promos) y, si no, en
   jp.pokellector.com (las primeras expansiones, Neo, VS y las secretas de SM/S que Limitless no tiene).
   6. último recurso: la imagen de otra versión de la misma carta (mismo nombre, otra expansión; si no hay
-     ninguna, se busca por nombre en pokemontcg.io). La carta se marca con "approx" para que la app y la web
+     ninguna, se busca por nombre en esos mismos datos). La carta se marca con "approx" para que la app y la web
      avisen de que es provisional.
 
 Lo encontrado se guarda en imagenes.json para no repetir la búsqueda cada día. Las provisionales y las que no
@@ -21,6 +22,7 @@ import os
 import re
 import time
 import unicodedata
+import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -28,7 +30,7 @@ from concurrent.futures import ThreadPoolExecutor
 UA = {"User-Agent": "tradeo-precios (https://github.com/SergiosDiaz/tradeo-precios)"}
 LIMITLESS = "https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/tpci"
 LIMITLESS_JP = "https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/tpc"
-PTCG_API = "https://api.pokemontcg.io/v2/cards"
+PTCG_DATA = "https://raw.githubusercontent.com/PokemonTCG/pokemon-tcg-data/master"
 
 # Expansión de TCGdex -> código de Limitless (y cómo pasar el número: "SWSH251" -> "251").
 LIMITLESS_SETS = {"svp": "SVP", "sve": "SVE", "mep": "MEP", "mee": "MEE", "swshp": "SP", "30th": "30C"}
@@ -106,27 +108,39 @@ def candidatos(c, set_lang, serie, oficial):
 
 
 class PokemonTCG:
-    """Imágenes de pokemontcg.io por expansión (una petición por expansión y ejecución)."""
+    """Imágenes de pokemontcg.io desde sus datos abiertos (un archivo por expansión, bajado como mucho una vez por
+    ejecución)."""
 
     def __init__(self):
         self.sets = {}
+        self.orden = None   # ids de expansión, de la más reciente a la más antigua
+        self.por_nombre_idx = {}   # nombre plano -> primera carta (la más reciente)
+        self.leidas = 0     # cuántas de `orden` están ya en el índice por nombre
+
+    def _bajar(self, ruta):
+        for intento in range(3):
+            try:
+                with urllib.request.urlopen(urllib.request.Request(f"{PTCG_DATA}/{ruta}", headers=UA), timeout=60) as r:
+                    return json.load(r)
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    return None
+            except Exception:
+                pass
+            time.sleep(3 * (intento + 1))
+        return None
+
+    def _cartas(self, pid):
+        if pid not in self.sets:
+            self.sets[pid] = self._bajar(f"cards/en/{pid}.json") or []
+        return self.sets[pid]
 
     def buscar(self, c):
         pid = PTCG_SETS.get(c["set"])
         if not pid:
             return None
-        if pid not in self.sets:
-            self.sets[pid] = []
-            url = f"{PTCG_API}?q=set.id:{pid}&select=number,name,images&pageSize=250"
-            for intento in range(4):   # su API es lenta y a veces da 500/502
-                try:
-                    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=90) as r:
-                        self.sets[pid] = json.load(r).get("data") or []
-                    break
-                except Exception:
-                    time.sleep(5 * (intento + 1))
         norm = lambda n: urllib.parse.unquote(n).lstrip("0") or "0"
-        cards = self.sets[pid]
+        cards = self._cartas(pid)
         hit = next((x for x in cards if norm(x.get("number", "")) == norm(c["num"])), None)
         if not hit:
             mismo = [x for x in cards if x.get("name", "").lower() == c["name"].lower()]
@@ -135,25 +149,23 @@ class PokemonTCG:
         return (imgs["small"], imgs.get("large") or imgs["small"]) if imgs.get("small") else None
 
     def por_nombre(self, nombre):
-        """Otra versión de la carta en pokemontcg.io, buscando por nombre (sin tildes): la más reciente."""
-        limpio = unicodedata.normalize("NFD", nombre.replace("’", "'")).encode("ascii", "ignore").decode().replace('"', "")
-        variantes = [limpio] + [re.sub(rf" {s}$", f"-{s}", limpio) for s in ("EX", "GX") if limpio.endswith(f" {s}")]
-        for nombre_buscado in variantes:
-            url = (f"{PTCG_API}?q=" + urllib.parse.quote(f'name:"{nombre_buscado}"')
-                   + "&select=id,images,set&orderBy=-set.releaseDate&pageSize=5")
-            data = []
-            for intento in range(3):
-                try:
-                    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=90) as r:
-                        data = json.load(r).get("data") or []
-                    break
-                except Exception:
-                    time.sleep(5 * (intento + 1))
-            for x in data:
-                imgs = x.get("images") or {}
-                if imgs.get("small"):
-                    return imgs["small"], imgs.get("large") or imgs["small"], x["id"]
-        return None
+        """Otra versión de la carta, buscando por nombre (sin tildes ni guiones): la más reciente. Las expansiones se
+        van leyendo de la más nueva a la más antigua hasta dar con ella."""
+        plano = lambda t: _plano(unicodedata.normalize("NFD", t.replace("’", "'")).encode("ascii", "ignore").decode())
+        buscado = plano(nombre)
+        if self.orden is None:
+            sets = self._bajar("sets/en.json") or []
+            self.orden = [x["id"] for x in sorted(sets, key=lambda x: x.get("releaseDate", ""), reverse=True)]
+        while buscado not in self.por_nombre_idx and self.leidas < len(self.orden):
+            pid = self.orden[self.leidas]
+            self.leidas += 1
+            for x in self._cartas(pid):
+                if (x.get("images") or {}).get("small"):
+                    self.por_nombre_idx.setdefault(plano(x.get("name", "")), x)
+        x = self.por_nombre_idx.get(buscado)
+        if not x:
+            return None
+        return x["images"]["small"], x["images"].get("large") or x["images"]["small"], x["id"]
 
 
 def _plano(texto):
@@ -265,7 +277,7 @@ def resolver(fichas, tiene_tcgdex, oficial, data_dir, hoy):
 
     with ThreadPoolExecutor(WORKERS) as ex:
         exactas = dict(ex.map(exacta, pendientes))
-    # pokemontcg.io, de una en una por expansión (no hace falta más velocidad y su API es delicada).
+    # pokemontcg.io, de una en una por expansión (cada una se baja una sola vez).
     for ficha, c in pendientes:
         if not exactas.get(c["id"]):
             hit = ptcg.buscar(c)
