@@ -66,6 +66,15 @@ POKELLECTOR_JP = {
     "ja-S6K": "Jet-Black-Spirit", "ja-S7D": "Towering-Perfection", "ja-S8": "Fusion-ARTS",
     "ja-S8b": "VMAX-Climax", "ja-S12a": "VSTAR-Universe",
 }
+# Expansión japonesa -> la misma expansión en inglés en pokemontcg.io: sus cartas llevan el mismo dibujo con el texto en
+# inglés. Mientras no haya la japonesa, se usa esa (provisional) en lugar de otra carta con el mismo nombre.
+GEMELAS_EN = {"ja-M6a": "me55"}
+# Rareza de aquí -> la de pokemontcg.io (para encontrar la misma carta: la ilustración rara de Lapras, no la normal).
+RAREZAS_EN = {
+    "Rara Ilustración": "Illustration Rare", "Rara Ilustración Especial": "Special Illustration Rare",
+    "Rara Futurista": "Futuristic Rare", "Rara Doble": "Double Rare", "Ultra Rara": "Ultra Rare",
+    "Hiper Rara": "Hyper Rare", "Común": "Common", "Poco Común": "Uncommon", "Rara": "Rare",
+}
 WORKERS = 8
 
 
@@ -148,6 +157,27 @@ class PokemonTCG:
             hit = mismo[0] if len(mismo) == 1 else None
         imgs = (hit or {}).get("images") or {}
         return (imgs["small"], imgs.get("large") or imgs["small"]) if imgs.get("small") else None
+
+    def gemela(self, c, ficha):
+        """La misma carta en la expansión inglesa gemela (mismo dibujo): mismo nombre y rareza; si hay varias (dos
+        Pikachu ex ilustración especial), la que va en el mismo orden. None si no hay."""
+        pid = GEMELAS_EN.get(c["set"])
+        rareza = RAREZAS_EN.get(c.get("rarity") or "")
+        if not pid or not rareza or not c.get("alias"):
+            return None
+        # El nombre igual o con la forma regional delante («Alolan Meowth», «Hisuian Zorua»): en japonés solo «Meowth».
+        mismas = lambda x, nombre: (x.get("rarity") == rareza and (_plano(x.get("name")) == _plano(nombre)
+                                    or (x.get("name") or "").lower().endswith(" " + nombre.lower())))
+        en = sorted((x for x in self._cartas(pid) if mismas(x, c["alias"])),
+                    key=lambda x: int(re.sub(r"\D", "", x.get("number", "")) or 0))
+        if not en:
+            return None
+        aqui = sorted((x for x in ficha["cards"] if x.get("alias") and _plano(x["alias"]) == _plano(c["alias"])
+                       and x.get("rarity") == c.get("rarity")), key=lambda x: x["num"])
+        i = next((k for k, x in enumerate(aqui) if x["id"] == c["id"]), 0)
+        x = en[min(i, len(en) - 1)]
+        imgs = x.get("images") or {}
+        return (imgs["small"], imgs.get("large") or imgs["small"], x["id"]) if imgs.get("small") else None
 
     def por_nombre(self, nombre):
         """Otra versión de la carta, buscando por nombre (sin tildes ni guiones): la más reciente. Las expansiones se
@@ -295,6 +325,11 @@ def resolver(fichas, tiene_tcgdex, oficial, data_dir, hoy):
         r = exactas.get(c["id"])
         if r:
             guardado[c["id"]] = {**r, "nombre": c["name"].lower(), "fecha": hoy}
+            continue
+        # Provisional buena: la misma carta (mismo dibujo) en la expansión inglesa gemela.
+        hit = ptcg.gemela(c, ficha)
+        if hit and existe(hit[0]):
+            guardado[c["id"]] = {"img": hit[0], "hi": hit[1], "approx": hit[2], "nombre": c["name"].lower(), "fecha": hoy}
             continue
         # Último recurso: otra versión de la misma carta, mejor de la misma serie y lo más reciente posible.
         otras = por_nombre.get(c["name"].lower(), [])
