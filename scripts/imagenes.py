@@ -48,6 +48,7 @@ POKELLECTOR_JP = {
     "ja-PMCG4": "Rocket-Gang", "ja-PMCG5": "Leaders-Stadium", "ja-PMCG6": "Challenge-from-the-Darkness",
     "ja-neo1": "Gold-Silver-to-a-New-World", "ja-neo2": "Crossing-the-Ruins", "ja-neo3": "Awakening-Legends",
     "ja-neo4": "Darkness-and-to-Light", "ja-VS1": "Pokemon-VS", "ja-BW8a": "Thunder-Knuckle",
+    "ja-E2": "The-Town-on-No-Map",
     "ja-M6a": "30th-Celebration-Japanese",
     "ja-SM1S": "Collection-Sun", "ja-SM1M": "Collection-Moon", "ja-SM1p": "Sun-Moon-Strengthening-Expansion",
     "ja-SM2K": "Islands-Awaiting-You", "ja-SM2L": "Alola-Moonlight",
