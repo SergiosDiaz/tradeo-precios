@@ -59,6 +59,8 @@ SET_VERSION = 6  # versión del formato de sets/<expansión>.json (la misma que 
 MAX_FALLOS = 0.2 # si falla más de esta parte de las expansiones, TCGdex debe de estar caído: no se publica nada
 ESPERA_FINAL = 60 if os.environ.get("SOLO") else 900  # segundos antes de reintentar al final las expansiones que han fallado
 JAPON = "ja-"    # delante de los ids de las expansiones y cartas japonesas
+# Las que no se añaden cuando una carta solo está en inglés: no se coleccionan y llenarían los álbumes.
+ENERGIAS_BASICAS = {f"{t} Energy" for t in ("Grass", "Fire", "Water", "Lightning", "Psychic", "Fighting", "Darkness", "Metal", "Fairy")}
 
 RAREZAS = {
     "Common": "Común", "Uncommon": "Infrecuente", "Rare": "Rara", "Rare Holo": "Rara Holo",
@@ -230,7 +232,7 @@ def carta(d, set_id, serie, lang):
         alias = alias_espanol(d)
         if alias:
             ficha["alias"] = alias
-    else:
+    elif lang == "es":
         anotar_pokedex(d)
     return ficha, precios
 
@@ -256,22 +258,39 @@ def expansion(set_id, serie):
         return None
     briefs = info["cards"]
 
-    def ficha(b):
-        return b, get(f"{API}/{lang}/cards/{urllib.parse.quote(b['id'])}")
+    # TCGdex tiene menos cartas en español que en inglés (sobre todo promos): las que faltan se añaden en inglés.
+    # Además se guarda el nombre inglés de cada carta, para reconocer con la cámara las impresas en inglés.
+    nombres_en, solo_en = {}, []
+    if lang == "es":
+        try:
+            en = (get(f"{API}/en/sets/{urllib.parse.quote(tcg_id)}") or {}).get("cards") or []
+        except Fallo as e:   # sin esto la expansión sigue valiendo: hoy se queda sin los nombres en inglés
+            print(f"::warning title={set_id}::sin datos en inglés: {e}")
+            en = []
+        nombres_en = {b["id"]: b.get("name") or "" for b in en}
+        conocidas = {b["id"] for b in briefs}
+        solo_en = [b for b in en if b["id"] not in conocidas and b.get("name") not in ENERGIAS_BASICAS]
+
+    def ficha(b, idioma=lang):
+        return b, get(f"{API}/{idioma}/cards/{urllib.parse.quote(b['id'])}"), idioma
 
     with ThreadPoolExecutor(WORKERS) as ex:
         fichas = list(ex.map(ficha, briefs))   # si una carta falla, Fallo se propaga y se aborta todo
-    if briefs and not japonesa and not any(mercado(d or b)[0][0] is not None for b, d in fichas):
+        fichas += list(ex.map(lambda b: ficha(b, "en"), solo_en))
+    if briefs and not japonesa and not any(mercado(d or b)[0][0] is not None for b, d, _ in fichas):
         diagnostico(briefs[0]["id"])
     cards, latest, index = [], {}, []
-    for brief, d in fichas:
-        c, p = carta(d or brief, set_id, serie, lang)
+    for brief, d, idioma in fichas:
+        c, p = carta(d or brief, set_id, serie, idioma)
         cards.append(c)
         if p[0] is not None:
             latest[c["id"]] = p
         fila = [c["id"], set_id, c["num"], c["name"], c["rarity"], p[0], 1 if brief.get("image") else 0]
+        nombre_en = nombres_en.get(brief["id"])
         if c.get("alias"):
             fila.append(c["alias"])
+        elif nombre_en and nombre_en != c["name"]:
+            fila += [None, nombre_en]   # el 7 es el nombre en español de las japonesas
         index.append(fila)
     cards.sort(key=orden)
     nombre = info.get("name", set_id)
@@ -442,10 +461,14 @@ def main():
         print(f"::warning title=imágenes::no se pudieron buscar imágenes extra: {e}")
         resueltas = {}
     for r in resultados.values():
+        # Las cartas solo en inglés de una expansión en español: quien vea un 1 buscaría su imagen en español, y no está.
+        en_ingles = {c["id"]: c["img"] for c in r[0]["cards"] if r[3] == "es" and "/en/" in (c.get("img") or "")}
         for fila in r[2]:
             # En el índice: 1 si TCGdex tiene imagen, la URL si se ha encontrado en otro sitio ("~" delante si es
             # provisional, de otra versión de la carta), 0 si no hay.
             fila[6] = 1 if fila[0] in tiene_tcgdex else resueltas.get(fila[0], 0)
+            if fila[6] == 1 and fila[0] in en_ingles:
+                fila[6] = en_ingles[fila[0]]
 
     # Lo que ha ido bien se publica; lo que ha fallado se queda con los datos del día anterior.
     index_sets, index_cards = {}, []

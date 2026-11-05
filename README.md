@@ -50,7 +50,8 @@ de verdad las imágenes que TCGdex dice tener; las que no, se buscan igual que l
 ```
 
 Cada carta: id, expansión, número, nombre, rareza, precio de hoy e imagen: `1` si TCGdex la tiene, la URL si se ha encontrado en otro sitio (con `~` delante si es provisional), `0` si no hay ninguna.
-`sets` da el nombre de cada expansión, su serie y el idioma de los datos (`en` si TCGdex no la tiene en español, `ja` en las japonesas).
+Después puede venir el nombre en español (solo en las japonesas; `null` en las demás) y, si es distinto, el nombre en inglés, que la cámara usa para reconocer las cartas impresas en inglés.
+`sets` da el nombre de cada expansión, su serie y el idioma de los datos (`en` si TCGdex no la tiene en español, `ja` en las japonesas). Las cartas sueltas que TCGdex no tiene en español se publican en inglés.
 
 ## Expansiones japonesas
 
