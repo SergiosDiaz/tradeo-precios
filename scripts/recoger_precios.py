@@ -59,6 +59,7 @@ SET_VERSION = 6  # versión del formato de sets/<expansión>.json (la misma que 
 MAX_FALLOS = 0.2 # si falla más de esta parte de las expansiones, TCGdex debe de estar caído: no se publica nada
 ESPERA_FINAL = 60 if os.environ.get("SOLO") else 900  # segundos antes de reintentar al final las expansiones que han fallado
 JAPON = "ja-"    # delante de los ids de las expansiones y cartas japonesas
+IDIOMAS_NOMBRES = ("en", "fr", "de", "it", "pt")   # los de TCGdex, además del español, para index/nombres.json
 # Las que no se añaden cuando una carta solo está en inglés: no se coleccionan y llenarían los álbumes.
 ENERGIAS_BASICAS = {f"{t} Energy" for t in ("Grass", "Fire", "Water", "Lightning", "Psychic", "Fighting", "Darkness", "Metal", "Fairy")}
 
@@ -260,13 +261,19 @@ def expansion(set_id, serie):
 
     # TCGdex tiene menos cartas en español que en inglés (sobre todo promos): las que faltan se añaden en inglés.
     # Además se guarda el nombre inglés de cada carta, para reconocer con la cámara las impresas en inglés.
+    otros = {}
+    if not japonesa:
+        def lista(idioma):
+            try:
+                return idioma, (get(f"{API}/{idioma}/sets/{urllib.parse.quote(tcg_id)}") or {}).get("cards") or []
+            except Fallo as e:   # la expansión sigue valiendo: esos nombres se quedan como ayer
+                print(f"::warning title={set_id}::sin nombres en {idioma}: {e}")
+                return idioma, []
+        with ThreadPoolExecutor(WORKERS) as ex:
+            otros = dict(ex.map(lista, [i for i in IDIOMAS_NOMBRES if i != lang]))
     nombres_en, solo_en = {}, []
     if lang == "es":
-        try:
-            en = (get(f"{API}/en/sets/{urllib.parse.quote(tcg_id)}") or {}).get("cards") or []
-        except Fallo as e:   # sin esto la expansión sigue valiendo: hoy se queda sin los nombres en inglés
-            print(f"::warning title={set_id}::sin datos en inglés: {e}")
-            en = []
+        en = otros.get("en", [])
         nombres_en = {b["id"]: b.get("name") or "" for b in en}
         conocidas = {b["id"] for b in briefs}
         solo_en = [b for b in en if b["id"] not in conocidas and b.get("name") not in ENERGIAS_BASICAS]
@@ -292,6 +299,14 @@ def expansion(set_id, serie):
         elif nombre_en and nombre_en != c["name"]:
             fila += [None, nombre_en]   # el 7 es el nombre en español de las japonesas
         index.append(fila)
+    # El nombre de cada carta en otros idiomas, solo si es distinto (Aroa: Lacey, Taro, Tara, Rupi, Tarsila).
+    base = {c["id"]: c["name"] for c in cards}
+    nombres = {}
+    for idioma, lista_idioma in otros.items():
+        for b in lista_idioma:
+            n = b.get("name")
+            if n and b["id"] in base and n != base[b["id"]]:
+                nombres.setdefault(b["id"], {})[idioma] = n
     cards.sort(key=orden)
     nombre = info.get("name", set_id)
     if japonesa and NOMBRES_JA.get(tcg_id):
@@ -303,7 +318,7 @@ def expansion(set_id, serie):
     }
     if japonesa:
         ficha_set["nameJa"] = info.get("name", set_id)
-    return ficha_set, latest, index, lang
+    return ficha_set, latest, index, lang, nombres
 
 
 def diagnostico(card_id):
@@ -474,7 +489,7 @@ def main():
     index_sets, index_cards = {}, []
     for set_id, _ in expansiones:
         if set_id in resultados:
-            ficha_set, latest, index, lang = resultados[set_id]
+            ficha_set, latest, index, lang, _ = resultados[set_id]
             escribir(os.path.join(DATA, "sets", f"{set_id}.json"), ficha_set)
             if latest:
                 escribir(os.path.join(DATA, "history", f"{set_id}.json"), historial(set_id, hoy, latest))
@@ -497,6 +512,19 @@ def main():
         if es_japonesa(set_id) and NOMBRES_JA.get(set_id[len(JAPON):]):
             index_sets[set_id] = [NOMBRES_JA[set_id[len(JAPON):]]] + list(fila[1:])
     escribir(os.path.join(DATA, "index", "cards.json"), {"updated": hoy, "sets": index_sets, "cards": index_cards})
+    # Los nombres en otros idiomas: los de hoy sobre los de ayer (si un idioma ha fallado, se quedan los de ayer).
+    idiomas_path = os.path.join(DATA, "index", "nombres.json")
+    try:
+        nombres_ayer = json.load(open(idiomas_path))
+    except (OSError, ValueError):
+        nombres_ayer = {}
+    nombres_hoy = {cid: n for r in resultados.values() for cid, n in r[4].items()}
+    idiomas = {}
+    for fila in index_cards:
+        n = {**nombres_ayer.get(fila[0], {}), **nombres_hoy.get(fila[0], {})}
+        if n:
+            idiomas[fila[0]] = n
+    escribir(idiomas_path, idiomas)
     escribir(nombres_path, {"sets": NOMBRES_JA, "series": SERIES_JA})
     escribir(pokedex_path, POKEDEX)
     print(f"\n{len(index_sets)} expansiones ({len(fallos)} con los datos del día anterior), "

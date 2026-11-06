@@ -53,6 +53,12 @@ Cada carta: id, expansión, número, nombre, rareza, precio de hoy e imagen: `1`
 Después puede venir el nombre en español (solo en las japonesas; `null` en las demás) y, si es distinto, el nombre en inglés, que la cámara usa para reconocer las cartas impresas en inglés.
 `sets` da el nombre de cada expansión, su serie y el idioma de los datos (`en` si TCGdex no la tiene en español, `ja` en las japonesas). Las cartas sueltas que TCGdex no tiene en español se publican en inglés.
 
+`index/nombres.json`: el nombre de cada carta en inglés, francés, alemán, italiano y portugués, solo los distintos del índice, para reconocerla con la cámara y buscarla en cualquier idioma:
+
+```json
+{ "sv07-166": { "en": "Lacey", "fr": "Taro", "de": "Tara", "it": "Rupi", "pt": "Tarsila" } }
+```
+
 ## Expansiones japonesas
 
 Son las que TCGdex tiene en japonés (las nuevas, como «ストームエメラルダ», entran solas en cuanto TCGdex las publica).
