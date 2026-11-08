@@ -24,6 +24,12 @@ versión de la misma carta (marcada como provisional con `approx`). Se guarda pa
 provisionales se vuelven a mirar cada día por si ya ha salido la buena. También comprueba (una vez por carta) que existen
 de verdad las imágenes que TCGdex dice tener; las que no, se buscan igual que las demás.
 
+`logos.json` y `logos/`: el logo de cada expansión (todas las de TCGdex, aquí y en Japón), descargado y guardado en la
+propia rama para no depender de la fuente (ver [`scripts/logos.py`](scripts/logos.py)). `logos.json` = `{"logos": {"swsh8":
+"logos/swsh8-1a2b3c.webp"}, "info": {"swsh8": {"src": "...", "aprox": false}}}`. Las japonesas salen de Scrydex; las que
+no tienen el suyo en ninguna parte llevan el de su serie (`aprox`) y se vuelven a buscar cada día. Las expansiones nuevas
+lo cogen solas al día siguiente de salir en TCGdex.
+
 `history/<expansión>.json`: historial de precios de una expansión.
 
 ```json
