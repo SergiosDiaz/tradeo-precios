@@ -44,6 +44,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
+import cardmarket
 import imagenes
 
 API = "https://api.tcgdex.net/v2"
@@ -81,6 +82,10 @@ RAREZAS = {
 POKEDEX = {}
 # Código de TCGdex -> nombre de aquí de las expansiones japonesas (se rellena al empezar).
 NOMBRES_JA = {}
+# Catálogo y guía de precios de Cardmarket (se cargan al empezar), para corregir los productos repetidos.
+CARDMARKET = None
+# Expansión -> cartas cuyo producto de Cardmarket ha cambiado desde ayer: su historial era el de otra carta.
+PRODUCTO_NUEVO = {}
 
 # Nombre occidental de las expansiones japonesas. Las modernas salen de Limitless (lista de expansiones japonesas
 # con su nombre en inglés y el mismo código que TCGdex); las antiguas y las de promos, de esta tabla.
@@ -299,6 +304,19 @@ def expansion(set_id, serie):
         elif nombre_en and nombre_en != c["name"]:
             fila += [None, nombre_en]   # el 7 es el nombre en español de las japonesas
         index.append(fila)
+    # Cartas con el producto de Cardmarket de otra versión (Growlithe 106 con el de la 018): el bueno y su precio.
+    filas = {fila[0]: fila for fila in index}
+    for cid, p in cardmarket.corregir(set_id, cards, CARDMARKET).items():
+        filas[cid][5] = p[0]
+        if p[0] is not None:
+            latest[cid] = p
+        else:
+            latest.pop(cid, None)
+    try:
+        ayer = {c["id"]: c.get("cm") for c in json.load(open(os.path.join(DATA, "sets", f"{set_id}.json")))["cards"]}
+    except (OSError, ValueError, KeyError):
+        ayer = {}
+    PRODUCTO_NUEVO[set_id] = {c["id"] for c in cards if ayer.get(c["id"]) and c.get("cm") and ayer[c["id"]] != c["cm"]}
     # El nombre de cada carta en otros idiomas, solo si es distinto (Aroa: Lacey, Taro, Tara, Rupi, Tarsila).
     base = {c["id"]: c["name"] for c in cards}
     nombres = {}
@@ -368,6 +386,8 @@ def historial(set_id, hoy, latest):
     for cid, p in latest.items():
         serie = cards.setdefault(cid, [None] * len(dates))
         serie.extend([None] * (len(dates) - len(serie)))
+        if cid in PRODUCTO_NUEVO.get(set_id, ()):
+            serie[:] = [None] * len(dates)   # lo de antes era el precio de otra carta
         serie[col] = p[0]
     data["latest"] = latest
     data["updated"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -410,6 +430,8 @@ def main():
     except (OSError, ValueError):
         anteriores = {}
     NOMBRES_JA.update(nombres_japonesas(anteriores))
+    global CARDMARKET
+    CARDMARKET = cardmarket.cargar()
     pokedex_path = os.path.join(DATA, "index", "pokedex.json")
     try:
         POKEDEX.update(json.load(open(pokedex_path)))

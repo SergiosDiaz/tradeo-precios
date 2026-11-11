@@ -9,6 +9,12 @@ Precios diarios de Cardmarket (vía [TCGdex](https://tcgdex.dev)) de **todas** l
   varios intentos, o llega sin los precios que tenía ayer porque TCGdex la sirve a medio actualizar), esa expansión se
   queda con los datos del día anterior y sale un aviso en la ejecución de GitHub. Si falla más del 20 % de las
   expansiones (TCGdex caído), no se publica nada y la ejecución termina con error.
+- TCGdex a veces le pone a la versión secreta de una carta el producto de Cardmarket de la normal (Growlithe 106 de
+  Dominio Delta salía con el de la 018: 0,04 € en vez de 9 €). [`scripts/cardmarket.py`](scripts/cardmarket.py) lo
+  corrige con el catálogo y la guía de precios públicos de Cardmarket: cuando varias cartas con el mismo nombre comparten
+  producto y en Cardmarket hay tantas versiones como cartas, la normal se queda la más barata y las demás van en el
+  orden de Cardmarket, con su precio. Si no cuadra, se deja como está y sale en el registro. El historial de una carta
+  que cambia de producto se empieza de cero (lo de antes era el precio de otra carta).
 - Los datos se publican en la rama [`data`](https://github.com/SergiosDiaz/tradeo-precios/tree/data), que se reescribe cada día como un único commit: así el repositorio no crece guardando versiones antiguas.
 - Para lanzarlo a mano: pestaña **Actions → Precios diarios → Run workflow**.
 
