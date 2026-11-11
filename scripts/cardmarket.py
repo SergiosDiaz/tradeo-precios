@@ -13,6 +13,7 @@ en el orden en que Cardmarket las dio de alta; y se les pone el precio de la gu�
 """
 import datetime
 import json
+import time
 import urllib.request
 from collections import defaultdict
 
@@ -46,17 +47,22 @@ class Catalogo:
 
 def cargar():
     """Catálogo y guía de precios de Cardmarket, o None si no se pueden descargar (entonces no se corrige nada)."""
-    try:
-        datos = []
-        for url in (CATALOGO, GUIA):
-            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=180) as r:
-                datos.append(json.load(r))
-        cat = Catalogo(datos[0]["products"], datos[1]["priceGuides"])
-        print(f"Cardmarket: {len(cat.producto)} productos, {len(cat.guia)} precios")
-        return cat
-    except Exception as e:
-        print(f"::warning title=Cardmarket::no se pudo descargar su catálogo; los productos repetidos se quedan como los da TCGdex: {e}")
-        return None
+    error = None
+    for intento in range(4):
+        try:
+            datos = []
+            for url in (CATALOGO, GUIA):
+                with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=180) as r:
+                    datos.append(json.load(r))
+            cat = Catalogo(datos[0]["products"], datos[1]["priceGuides"])
+            print(f"Cardmarket: {len(cat.producto)} productos, {len(cat.guia)} precios")
+            return cat
+        except Exception as e:
+            error = e
+            time.sleep(30 * (intento + 1))
+    print(f"::warning title=Cardmarket::no se pudo descargar su catálogo; las cartas corregidas se quedan con el "
+          f"producto y el precio de ayer: {error}")
+    return None
 
 
 def _numero(c):

@@ -42,6 +42,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
 import cardmarket
@@ -313,10 +314,25 @@ def expansion(set_id, serie):
         else:
             latest.pop(cid, None)
     try:
-        ayer = {c["id"]: c.get("cm") for c in json.load(open(os.path.join(DATA, "sets", f"{set_id}.json")))["cards"]}
+        ayer = {c["id"]: c for c in json.load(open(os.path.join(DATA, "sets", f"{set_id}.json")))["cards"]}
     except (OSError, ValueError, KeyError):
         ayer = {}
-    PRODUCTO_NUEVO[set_id] = {c["id"] for c in cards if ayer.get(c["id"]) and c.get("cm") and ayer[c["id"]] != c["cm"]}
+    if CARDMARKET is None:
+        # Sin el catálogo de Cardmarket no se puede corregir: las cartas que ayer se corrigieron (TCGdex les sigue dando
+        # el producto de otra versión, compartido) se quedan con su producto y su precio de ayer, no con los de la otra.
+        repetidos = Counter(c["cm"] for c in cards if c.get("cm"))
+        for c in cards:
+            a = ayer.get(c["id"])
+            if a and a.get("cm") and c.get("cm") != a["cm"] and repetidos[c.get("cm")] > 1:
+                c["cm"] = a["cm"]
+                c["price"], c["p1"], c["p7"], c["p30"] = (a.get(k) for k in ("price", "p1", "p7", "p30"))
+                filas[c["id"]][5] = c["price"]
+                if c["price"] is not None:
+                    latest[c["id"]] = [c["price"], c["p1"], c["p7"], c["p30"]]
+                else:
+                    latest.pop(c["id"], None)
+    PRODUCTO_NUEVO[set_id] = {c["id"] for c in cards
+                              if ayer.get(c["id"], {}).get("cm") and c.get("cm") and ayer[c["id"]]["cm"] != c["cm"]}
     # El nombre de cada carta en otros idiomas, solo si es distinto (Aroa: Lacey, Taro, Tara, Rupi, Tarsila).
     base = {c["id"]: c["name"] for c in cards}
     nombres = {}
