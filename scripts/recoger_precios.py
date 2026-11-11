@@ -305,14 +305,23 @@ def expansion(set_id, serie):
         elif nombre_en and nombre_en != c["name"]:
             fila += [None, nombre_en]   # el 7 es el nombre en español de las japonesas
         index.append(fila)
-    # Cartas con el producto de Cardmarket de otra versión (Growlithe 106 con el de la 018): el bueno y su precio.
     filas = {fila[0]: fila for fila in index}
-    for cid, p in cardmarket.corregir(set_id, cards, CARDMARKET).items():
+
+    def precio(cid, p):
         filas[cid][5] = p[0]
         if p[0] is not None:
             latest[cid] = p
         else:
             latest.pop(cid, None)
+    # Cartas con el producto de Cardmarket de otra versión (Growlithe 106 con el de la 018): el bueno y su precio.
+    for cid, p in cardmarket.corregir(set_id, cards, CARDMARKET).items():
+        precio(cid, p)
+    # Las que TCGdex deja sin producto de Cardmarket (aunque esté), por su nombre en inglés.
+    if not japonesa:
+        ingles = {c["id"]: nombres_en.get(c["id"]) or (c["name"] if idioma == "en" else None)
+                  for c, (_, _, idioma) in zip(cards, fichas)}
+        for cid, p in cardmarket.enlazar(set_id, cards, CARDMARKET, ingles).items():
+            precio(cid, p)
     try:
         ayer = {c["id"]: c for c in json.load(open(os.path.join(DATA, "sets", f"{set_id}.json")))["cards"]}
     except (OSError, ValueError, KeyError):
@@ -323,14 +332,14 @@ def expansion(set_id, serie):
         repetidos = Counter(c["cm"] for c in cards if c.get("cm"))
         for c in cards:
             a = ayer.get(c["id"])
-            if a and a.get("cm") and c.get("cm") != a["cm"] and repetidos[c.get("cm")] > 1:
+            # (y las que hoy llegan sin producto: las que enlazó el robot, o TCGdex a medio actualizar)
+            if a and a.get("cm") and c.get("cm") != a["cm"] and (not c.get("cm") or repetidos[c["cm"]] > 1):
                 c["cm"] = a["cm"]
                 c["price"], c["p1"], c["p7"], c["p30"] = (a.get(k) for k in ("price", "p1", "p7", "p30"))
-                filas[c["id"]][5] = c["price"]
-                if c["price"] is not None:
-                    latest[c["id"]] = [c["price"], c["p1"], c["p7"], c["p30"]]
-                else:
-                    latest.pop(c["id"], None)
+                precio(c["id"], [c["price"], c["p1"], c["p7"], c["p30"]])
+    # Y el precio de todas, directamente de la guía de Cardmarket (la de TCGdex es la misma, pero con retraso).
+    for cid, p in cardmarket.poner_precios(cards, CARDMARKET, ayer).items():
+        precio(cid, p)
     PRODUCTO_NUEVO[set_id] = {c["id"] for c in cards
                               if ayer.get(c["id"], {}).get("cm") and c.get("cm") and ayer[c["id"]]["cm"] != c["cm"]}
     # El nombre de cada carta en otros idiomas, solo si es distinto (Aroa: Lacey, Taro, Tara, Rupi, Tarsila).
@@ -439,6 +448,9 @@ def main():
     series_ja = [s["id"] for s in get(f"{API}/ja/series") or []]
     expansiones += [(JAPON + x["id"], sid) for sid in series_ja
                     for x in (get(f"{API}/ja/series/{urllib.parse.quote(sid)}") or {}).get("sets", [])]
+    # Cada expansión una vez: TCGdex lista dos veces alguna (ラセンフォース, BW8a), y sus cartas salían repetidas en el índice.
+    vistas = set()
+    expansiones = [e for e in expansiones if not (e[0] in vistas or vistas.add(e[0]))]
     sets_ayer, filas_ayer = indice_anterior()
     nombres_path = os.path.join(DATA, "index", "nombres_ja.json")
     try:

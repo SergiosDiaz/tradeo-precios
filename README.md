@@ -1,6 +1,6 @@
 # tradeo-precios
 
-Precios diarios de Cardmarket (vía [TCGdex](https://tcgdex.dev)) de **todas** las cartas Pokémon TCG en español y en japonés, para la app **Tradeo** y la web del álbum.
+Precios diarios de Cardmarket (las cartas, de [TCGdex](https://tcgdex.dev)) de **todas** las cartas Pokémon TCG en español y en japonés, para la app **Tradeo** y la web del álbum.
 
 - Cada día de madrugada, [`precios.yml`](.github/workflows/precios.yml) ejecuta [`scripts/recoger_precios.py`](scripts/recoger_precios.py):
   recorre las expansiones en español (unas 150, 17.000 cartas) y después las japonesas (unas 190, 18.000 cartas), con pocas peticiones a la vez para no cargar TCGdex,
@@ -9,12 +9,20 @@ Precios diarios de Cardmarket (vía [TCGdex](https://tcgdex.dev)) de **todas** l
   varios intentos, o llega sin los precios que tenía ayer porque TCGdex la sirve a medio actualizar), esa expansión se
   queda con los datos del día anterior y sale un aviso en la ejecución de GitHub. Si falla más del 20 % de las
   expansiones (TCGdex caído), no se publica nada y la ejecución termina con error.
-- TCGdex a veces le pone a la versión secreta de una carta el producto de Cardmarket de la normal (Growlithe 106 de
-  Dominio Delta salía con el de la 018: 0,04 € en vez de 9 €). [`scripts/cardmarket.py`](scripts/cardmarket.py) lo
-  corrige con el catálogo y la guía de precios públicos de Cardmarket: cuando varias cartas con el mismo nombre comparten
-  producto y en Cardmarket hay tantas versiones como cartas, la normal se queda la más barata y las demás van en el
-  orden de Cardmarket, con su precio. Si no cuadra, se deja como está y sale en el registro. El historial de una carta
-  que cambia de producto se empieza de cero (lo de antes era el precio de otra carta).
+- **Precios: directamente de Cardmarket.** TCGdex no tiene precios propios: copia la guía de precios que Cardmarket
+  publica cada día, pero a veces con uno o más días de retraso o a medio actualizar. Así que el robot descarga el
+  catálogo y la guía de precios públicos de Cardmarket ([`scripts/cardmarket.py`](scripts/cardmarket.py)) y pone el
+  precio de cada carta desde ahí (tendencia, media de 1, 7 y 30 días). TCGdex se usa para saber qué cartas hay (número,
+  nombre, rareza, imagen) y qué producto de Cardmarket es cada una. Si un día no se puede descargar Cardmarket, se usan
+  los precios de TCGdex, y las cartas que el robot había corregido o enlazado se quedan con su producto y precio de ayer.
+  - TCGdex a veces le pone a la versión secreta de una carta el producto de la normal (Growlithe 106 de Dominio Delta
+    salía con el de la 018: 0,04 € en vez de 9 €). Cuando varias cartas con el mismo nombre comparten producto y en
+    Cardmarket hay tantas versiones como cartas, la normal se queda la más barata y las demás van en el orden de
+    Cardmarket. Si no cuadra, se deja como está y sale en el registro. El historial de una carta que cambia de producto
+    se empieza de cero (lo de antes era el precio de otra carta).
+  - Y a unas 800 cartas no les pone producto (Disposición del Profesor Oak 201 y 233 de Eclipse Cósmico). Se buscan por
+    su nombre en inglés entre los productos de esa expansión en Cardmarket que no tienen carta: solo si hay tantos como
+    cartas, son versiones de la misma carta y se dieron de alta a la vez que el resto de la expansión (unas 150 cartas).
 - Los datos se publican en la rama [`data`](https://github.com/SergiosDiaz/tradeo-precios/tree/data), que se reescribe cada día como un único commit: así el repositorio no crece guardando versiones antiguas.
 - Para lanzarlo a mano: pestaña **Actions → Precios diarios → Run workflow**.
 
@@ -89,4 +97,4 @@ Sale de `index/pokedex.json` (número de la Pokédex → nombre en español), qu
 Las imágenes son las de TCGdex en japonés; si TCGdex aún no la tiene (expansiones recién salidas), la de otra versión
 japonesa de la misma carta, marcada como provisional.
 
-Los precios son la tendencia general de Cardmarket (mezcla todos los idiomas y estados).
+Los precios son la tendencia general de Cardmarket (mezcla todos los idiomas y estados), también directamente de su guía.
