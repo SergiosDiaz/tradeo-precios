@@ -125,20 +125,6 @@ def archivo(sid, ext):
     return f"logos/{safe}-{hashlib.md5(sid.encode()).hexdigest()[:6]}.{ext}"
 
 
-def transparente(data):
-    """Si el logo tiene el fondo transparente. pokemon.com tiene alguno con fondo blanco (Juntos de Aventuras, Choque
-    Rebelde) y WikiDex los de McDonald's: en la app saldría un rectángulo blanco. Sin Pillow, se da por bueno."""
-    try:
-        import io
-        from PIL import Image
-        img = Image.open(io.BytesIO(data)).convert("RGBA")
-    except Exception:
-        return True
-    w, h = img.size
-    esquinas = [(1, 1), (w - 2, 1), (1, h - 2), (w - 2, h - 2)]
-    return sum(img.getpixel(x)[3] > 250 for x in esquinas) < 3
-
-
 def guardar(sid, data, lang=None):
     """Guarda un logo nuevo (en webp de ANCHO px como mucho si está Pillow) y devuelve su ruta en la rama."""
     try:
@@ -182,12 +168,7 @@ def codigos_pokemon(sid, serie):
 def pokemon(code, lang):
     url = POKEMON.format(cms=POKEMON_CMS[lang], code=code, name=code.split("/")[-1], lang=lang)
     data = fetch(url)
-    return (url, data) if ext_of(data) and transparente(data) else None
-
-
-def existe_pokemon(code):
-    """Si pokemon.com tiene esa expansión (su logo en inglés, aunque tenga fondo)."""
-    return bool(ext_of(fetch(POKEMON.format(cms=POKEMON_CMS["en"], code=code, name=code.split("/")[-1], lang="en"))))
+    return (url, data) if ext_of(data) else None
 
 
 def wikidex_tabla():
@@ -221,7 +202,7 @@ def wikidex(nombre_archivo):
     for url in (info.get("thumburl"), info.get("url")):
         data = fetch(url) if url else None
         if ext_of(data):
-            return (url, data) if transparente(data) else None
+            return url, data
     return None
 
 
@@ -367,21 +348,6 @@ def main():
     prev = json.load(open(path)) if os.path.exists(path) else {"logos": {}, "info": {}}
     logos, info = prev.get("logos", {}), prev.get("info", {})
 
-    # Los logos por idioma con fondo (no transparente), fuera: se vuelven a buscar hoy mismo en otra fuente.
-    forzar = set()
-    for lang, m in prev.get("idiomas", {}).items():
-        for sid, rel in list(m.items()):
-            f = os.path.join(DATA, rel)
-            if os.path.exists(f) and not transparente(open(f, "rb").read()):
-                del m[sid]
-                prev.get("info_idiomas", {}).pop(f"{lang}:{sid}", None)
-                forzar.add(sid)
-                if logos.get(sid) == rel:   # `logos` era ese mismo: se busca otra vez el de siempre
-                    logos.pop(sid)
-                    info.pop(sid, None)
-    if forzar:
-        print(f"logos con fondo, quitados: {', '.join(sorted(forzar))}")
-
     # Todas las expansiones que se pueden añadir en la app y la web: las del índice y todas las de TCGdex (aquí y Japón).
     index = dict(json.load(open(os.path.join(DATA, "index", "cards.json")))["sets"])  # sid -> [nombre, serie, idioma]
     for lang, prefix in (("es", ""), ("ja", "ja-")):
@@ -485,12 +451,24 @@ def main():
     info_l, codigos = prev.get("info_idiomas", {}), prev.get("pokemon", {})
     vistas = prev.get("vistas", {})
     primera_vez = "idiomas" not in prev
+    # Una sola vez (versión 2): los logos de pokemon.com que se cambiaron por otros por tener fondo (12/11/2026) se
+    # vuelven a coger de pokemon.com, y se busca otra vez todo lo que falta (los de McDonald's de WikiDex).
+    rehacer = set()
+    if prev.get("version") != 2 and not primera_vez:
+        primera_vez = True
+        for sid in codigos:
+            for lang in IDIOMAS:
+                src = info_l.get(f"{lang}:{sid}", {}).get("src", "")
+                if src and "pokemon.com" not in src:
+                    rehacer.add((sid, lang))
     lunes = dt.date.today().weekday() == 0
     aqui = [sid for sid in index if not sid.startswith("ja-")]
     for sid in aqui:   # la primera vez, las que ya había cuentan como antiguas (solo se reintentan los lunes)
         vistas.setdefault(sid, "2000-01-01" if primera_vez else hoy)
 
     def falta(sid, lang):
+        if (sid, lang) in rehacer:
+            return True
         p = idiomas[lang].get(sid)
         return not (p and os.path.exists(os.path.join(DATA, p)))
 
@@ -500,7 +478,7 @@ def main():
     # Lo que falta en algún idioma se busca cada día los dos primeros meses de la expansión (el español suele llegar
     # unos días más tarde que el inglés) y después los lunes (las antiguas en francés, alemán o italiano no van a salir).
     por_buscar = [sid for sid in aqui if any(falta(sid, lang) for lang in IDIOMAS)
-                  and (primera_vez or lunes or reciente(sid) or sid in forzar)]
+                  and (primera_vez or lunes or reciente(sid))]
     print(f"logos por idioma: {len(por_buscar)} expansiones por buscar")
     wd = wikidex_tabla() if any(falta(sid, "es") for sid in por_buscar) else {}
     ptcg_l = ptcg or (cargar_ptcg() if por_buscar else {})
@@ -514,7 +492,7 @@ def main():
         code, res = codigos.get(sid), {}
         try:
             if not code:
-                code = next((c for c in codigos_pokemon(sid, serie) if existe_pokemon(c)), None)
+                code = next((c for c in codigos_pokemon(sid, serie) if pokemon(c, "en")), None)
             for lang in IDIOMAS:
                 if not falta(sid, lang):
                     continue
@@ -556,13 +534,10 @@ def main():
     # `logos` (el de las versiones de la app sin idiomas), en las de aquí: el español.
     for sid in aqui:
         es_path = idiomas["es"].get(sid)
-        if es_path and logos.get(sid) != es_path:
+        es_src = info_l.get(f"es:{sid}", {}).get("src", "")
+        if es_path and (logos.get(sid) != es_path or info.get(sid, {}).get("src") != es_src):
             logos[sid] = es_path
             info[sid] = {"src": info_l.get(f"es:{sid}", {}).get("src", ""), "aprox": False, "at": hoy}
-        elif not es_path and info.get(sid, {}).get("aprox") and idiomas["en"].get(sid):
-            # Sin el suyo pero con el inglés: mejor el inglés que el de su serie.
-            logos[sid] = idiomas["en"][sid]
-            info[sid] = {"src": info_l.get(f"en:{sid}", {}).get("src", ""), "aprox": False, "at": hoy}
     print("logos por idioma nuevos: " + (", ".join(f"{k} {v}" for k, v in nuevos.items()) or "ninguno") + "; "
           + ", ".join(f"{lang} {len(idiomas[lang])}" for lang in IDIOMAS) + f" de {len(aqui)}")
 
@@ -575,7 +550,7 @@ def main():
     sin = sorted(s for s in index if s not in logos)
     aprox = sorted(s for s in index if info.get(s, {}).get("aprox"))
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"updated": hoy, "logos": dict(sorted(logos.items())), "info": dict(sorted(info.items())),
+        json.dump({"version": 2, "updated": hoy, "logos": dict(sorted(logos.items())), "info": dict(sorted(info.items())),
                    "idiomas": {lang: dict(sorted(d.items())) for lang, d in idiomas.items()},
                    "info_idiomas": dict(sorted(info_l.items())), "pokemon": dict(sorted(codigos.items())),
                    "vistas": dict(sorted(vistas.items()))}, f, ensure_ascii=False, separators=(",", ":"))
