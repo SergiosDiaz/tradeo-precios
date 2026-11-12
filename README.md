@@ -44,6 +44,12 @@ propia rama para no depender de la fuente (ver [`scripts/logos.py`](scripts/logo
 no tienen el suyo en ninguna parte llevan el de su serie (`aprox`) y se vuelven a buscar cada día. Las expansiones nuevas
 lo cogen solas al día siguiente de salir en TCGdex.
 
+Y en cada idioma (`"idiomas": {"es": {...}, "en": {...}, "fr": ..., "de": ..., "it": ...}`), para que cada álbum lleve el
+logo del idioma en que se colecciona («Dominio Delta» / «Delta Reign»): el oficial de pokemon.com (todas desde Sol y
+Luna, y bastantes de antes); en español, si no, el de WikiDex; en inglés, el de TCGdex, pokemontcg.io o Scrydex. Lo que
+falta se busca cada día los dos primeros meses de una expansión y después los lunes. `logos` es el español (lo usan las
+versiones de la app de antes de los idiomas). Los nuevos se guardan en webp de 600 px como mucho.
+
 `history/<expansión>.json`: historial de precios de una expansión.
 
 ```json

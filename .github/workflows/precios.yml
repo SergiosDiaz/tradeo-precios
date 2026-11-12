@@ -56,7 +56,9 @@ jobs:
       # y los logos de ayer siguen ahí.
       - name: Logos de las expansiones
         continue-on-error: true
-        run: python3 scripts/logos.py data
+        run: |
+          pip install -q pillow || echo "::warning::sin Pillow: los logos nuevos se guardan tal cual"
+          python3 scripts/logos.py data
 
       - name: Publicar en la rama data (un solo commit, sin versiones antiguas)
         env:

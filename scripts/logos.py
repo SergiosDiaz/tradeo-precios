@@ -1,20 +1,32 @@
 #!/usr/bin/env python3
-"""Logo de cada expansión (las de aquí y las japonesas), guardado en la propia rama `data`.
+"""Logo de cada expansión (las de aquí y las japonesas), guardado en la propia rama `data`, y en cada idioma.
 
 Cada día, después de los precios, mira las expansiones del índice (index/cards.json). Las que aún no tienen logo
 guardado lo buscan, lo descargan y lo guardan en logos/<archivo>; así la app y la web no dependen de que la fuente
 lo siga teniendo. Publica logos.json:
 
     {"updated": "2026-11-09", "logos": {"swsh8": "logos/swsh8-1a2b3c.webp", "ja-S12a": "logos/ja-S12a-4d5e6f.png"},
-     "info": {"swsh8": {"src": "<url de origen>", "aprox": false, "at": "2026-11-09"}}}
+     "info": {"swsh8": {"src": "<url de origen>", "aprox": false, "at": "2026-11-09"}},
+     "idiomas": {"es": {"me06": "logos/me06-…-es.webp"}, "en": {"me06": "logos/me06-…-en.webp"}, "fr": {…}, …},
+     "info_idiomas": {"es:me06": {"src": "<url de origen>", "at": "2026-11-12"}}, "pokemon": {"me06": "me_series/me06"}}
+
+`logos` es el de siempre (el que usan las versiones de la app de antes de los idiomas): en las de aquí, el español si lo
+hay. `idiomas` es el logo de cada expansión en cada idioma, para que cada álbum lleve el del idioma en que se colecciona
+(«Dominio Delta» en español, «Delta Reign» en inglés): la app usa el de su idioma, si no el inglés y si no `logos`.
 
 De dónde sale el logo:
-- De aquí: el de TCGdex en español; si no, el de TCGdex en inglés; si no, el oficial de pokemontcg.io (por el nombre
-  en inglés) o el de Scrydex; para unas pocas, uno fijado a mano.
+- En cada idioma (español, inglés, francés, alemán e italiano): el oficial de pokemon.com, que los tiene todos desde
+  Sol y Luna (2017) con una dirección fija por expansión (ver POKEMON). En español, si no: el de WikiDex (la wiki en
+  español: tiene también las antiguas) y si no el de TCGdex en español. En inglés, si no: el de TCGdex en inglés, el
+  de pokemontcg.io o el de Scrydex. Lo que falte en un idioma se vuelve a buscar cada día durante los dos meses
+  siguientes a que salga la expansión (y después, los lunes): el español suele llegar unos días más tarde.
+- `logos` (de aquí): el español; si no, el de TCGdex en español; si no, el inglés; para unas pocas, uno fijado a mano.
 - Japonesas (TCGdex no tiene ningún logo suyo): el japonés de Scrydex. Primero por el código («S12a» es «swsh12a_ja»);
   si no, por la fecha de salida y el número de cartas, comprobando que el nombre japonés sale en su ficha.
 - Si no se encuentra el suyo, el de la expansión principal de su serie (marcado `aprox`): así todas tienen logo, y los
   aproximados se vuelven a buscar cada día por si ya ha salido el bueno.
+
+Los que se descargan nuevos se guardan en webp de 600 px como mucho (si está Pillow), para que la rama no crezca.
 
 Al final avisa (en la ejecución de GitHub) de las expansiones con logo aproximado.
 
@@ -31,6 +43,7 @@ import time
 import unicodedata
 import urllib.parse
 import urllib.request
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
 DATA = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "data")
@@ -51,6 +64,21 @@ SERIE_INTERNACIONAL = {"PMCG": "base", "neo": "neo", "e": "ecard", "ADV": "ex", 
 # Logos fijados a mano (promos sin logo en TCGdex ni en pokemontcg.io).
 FIJOS = {"svp": "https://images.pokemontcg.io/svp/logo.png",
          "mep": SCRYDEX.format("mep")}
+
+IDIOMAS = ("es", "en", "fr", "de", "it")
+# Logos oficiales de pokemon.com: …/cms2-es-es/img/trading-card-game/series/me_series/me06/me06_logo_169_es.png
+POKEMON = "https://www.pokemon.com/static-assets/content-assets/{cms}/img/trading-card-game/series/{code}/{name}_logo_169_{lang}.png"
+POKEMON_CMS = {"es": "cms2-es-es", "en": "cms2", "fr": "cms2-fr-fr", "de": "cms2-de-de", "it": "cms2-it-it"}
+# Las que pokemon.com no llama como TCGdex (las demás salen solas: «sv03.5» es «sv035», «sm1» es «sm01»…). Pokémon GO
+# (swsh10.5) no: el suyo es el de las dos marcas juntas, pequeño; mejor el de WikiDex.
+POKEMON_MANUAL = {"30th": "me_series/30th", "swsh10.5": None}
+# Las de WikiDex que no se llaman como en TCGdex (TCGdex: «Albor de Guadianes»).
+WIKIDEX = "https://www.wikidex.net/api.php"
+# (Y las antiguas, que TCGdex solo tiene en inglés.)
+WIKIDEX_MANUAL = {"sm2": "Albor de Guardianes", "hgss1": "HeartGold y SoulSilver",
+                  "sv10.5b": "Fulgor Negro y Llama Blanca", "sv10.5w": "Fulgor Negro y Llama Blanca",
+                  "g1": "Generaciones", "base2": "Jungla", "base3": "Fósil", "bw11": "Tesoros Legendarios"}
+ANCHO = 600
 
 
 def get_json(url, retries=3):
@@ -95,6 +123,87 @@ def archivo(sid, ext):
     """Nombre de archivo seguro y único (hay ids que solo cambian en mayúsculas o llevan «+» y «.»)."""
     safe = re.sub(r"[^A-Za-z0-9_-]+", "_", sid)
     return f"logos/{safe}-{hashlib.md5(sid.encode()).hexdigest()[:6]}.{ext}"
+
+
+def guardar(sid, data, lang=None):
+    """Guarda un logo nuevo (en webp de ANCHO px como mucho si está Pillow) y devuelve su ruta en la rama."""
+    try:
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        if img.width > ANCHO:
+            img = img.resize((ANCHO, round(img.height * ANCHO / img.width)), Image.LANCZOS)
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGBA")
+        out = io.BytesIO()
+        img.save(out, "WEBP", quality=88)
+        data = out.getvalue()
+    except Exception:
+        pass   # sin Pillow (o una imagen rara): tal cual
+    rel = archivo(sid + (f"@{lang}" if lang else ""), ext_of(data))
+    with open(os.path.join(DATA, rel), "wb") as f:
+        f.write(data)
+    return rel
+
+
+# ---------- en cada idioma ----------
+
+def codigos_pokemon(sid, serie):
+    """Cómo puede llamar pokemon.com a una expansión de TCGdex: «sv03.5» -> «sv_series/sv035»,
+    «sm1» -> «sm_series/sm01», «sv06.5» -> «sv_series/sv6pt5», «me02.5» -> «me_series/me2pt5»."""
+    if sid in POKEMON_MANUAL:
+        return [POKEMON_MANUAL[sid]] if POKEMON_MANUAL[sid] else []
+    m = re.match(r"^([a-z]+)0*(\d+)(\.5)?$", sid)
+    if not m:
+        return [f"{serie}_series/{sid}"]
+    pre, n, half = m.group(1), int(m.group(2)), m.group(3)
+    if half:
+        names = [f"{pre}{n:02d}5", f"{pre}{n}pt5", f"{pre}{n}5"]
+    else:
+        names = [f"{pre}{n:02d}", f"{pre}{n}"]
+    return [f"{serie}_series/{x}" for x in dict.fromkeys(names)]
+
+
+def pokemon(code, lang):
+    url = POKEMON.format(cms=POKEMON_CMS[lang], code=code, name=code.split("/")[-1], lang=lang)
+    data = fetch(url)
+    return (url, data) if ext_of(data) else None
+
+
+def wikidex_tabla():
+    """Logos de expansiones de WikiDex: nombre normalizado -> título del archivo («Logo Dominio Delta (TCG).png»)."""
+    out, cont = {}, {}
+    while True:
+        q = {"action": "query", "list": "allimages", "aiprefix": "Logo_", "ailimit": "500", "format": "json", **cont}
+        try:
+            d = get_json(WIKIDEX + "?" + urllib.parse.urlencode(q))
+        except Exception as e:
+            print(f"::warning::WikiDex: {e}")
+            return out
+        for i in d["query"]["allimages"]:
+            m = re.match(r"^Logo_(.+)_\(TCG\)\.(png|jpg|webp)$", i["name"])
+            if m:
+                out[norm(m.group(1).replace("_", " "))] = i["name"]
+        if "continue" not in d:
+            return out
+        cont = d["continue"]
+
+
+def wikidex(nombre_archivo):
+    """El logo de WikiDex, en miniatura de ANCHO px (los originales llegan a 4000 px)."""
+    q = {"action": "query", "titles": "Archivo:" + nombre_archivo, "prop": "imageinfo", "iiprop": "url",
+         "iiurlwidth": str(ANCHO), "format": "json"}
+    try:
+        pages = get_json(WIKIDEX + "?" + urllib.parse.urlencode(q))["query"]["pages"]
+        info = next(iter(pages.values()))["imageinfo"][0]
+    except Exception:
+        return None
+    for url in (info.get("thumburl"), info.get("url")):
+        data = fetch(url) if url else None
+        if ext_of(data):
+            return url, data
+    return None
 
 
 # Scrydex responde con el logo genérico de Pokémon a lo que no tiene: se reconoce por su huella.
@@ -189,10 +298,19 @@ def logo_es(sid, ficha, en_nombre, ptcg, serie):
         if ext_of(data):
             return FIJOS[sid], data
     logo = (ficha or {}).get("logo")
-    for url in ([logo + ".webp", logo + ".png"] if logo else []) + [f"https://assets.tcgdex.net/en/{serie}/{sid}/logo.webp"]:
+    for url in ([logo + ".webp", logo + ".png"] if logo else []):
         data = fetch(url)
         if ext_of(data):
             return url, data
+    return logo_en(sid, en_nombre, ptcg, serie)
+
+
+def logo_en(sid, en_nombre, ptcg, serie):
+    """El inglés (sin pokemon.com): TCGdex en inglés, pokemontcg.io o Scrydex."""
+    url = f"https://assets.tcgdex.net/en/{serie}/{sid}/logo.webp"
+    data = fetch(url)
+    if ext_of(data):
+        return url, data
     hit = ptcg.get(MANUAL.get(sid, "")) or ptcg.get(norm(en_nombre))
     if hit and hit.get("images", {}).get("logo"):
         data = fetch(hit["images"]["logo"])
@@ -204,6 +322,23 @@ def logo_es(sid, ficha, en_nombre, ptcg, serie):
             if found:
                 return found
     return None
+
+
+def cargar_ptcg():
+    """Expansiones de pokemontcg.io, por id y por nombre normalizado."""
+    sets, page = [], 1
+    while True:
+        try:
+            d = get_json(f"https://api.pokemontcg.io/v2/sets?page={page}&pageSize=250")
+        except Exception:
+            break
+        sets += d["data"]
+        if len(sets) >= d["totalCount"] or not d["data"]:
+            break
+        page += 1
+    ptcg = {s["id"]: s for s in sets}
+    ptcg.update({norm(s["name"]): s for s in sets})
+    return ptcg
 
 
 def main():
@@ -240,20 +375,7 @@ def main():
     ja = [sid for sid in pendientes if sid.startswith("ja-")]
     es = [sid for sid in pendientes if not sid.startswith("ja-")]
     tabla = scrydex_jp_table() if ja else []
-    ptcg = {}
-    if es:
-        sets, page = [], 1
-        while True:
-            try:
-                d = get_json(f"https://api.pokemontcg.io/v2/sets?page={page}&pageSize=250")
-            except Exception:
-                break
-            sets += d["data"]
-            if len(sets) >= d["totalCount"] or not d["data"]:
-                break
-            page += 1
-        ptcg = {s["id"]: s for s in sets}
-        ptcg.update({norm(s["name"]): s for s in sets})
+    ptcg = cargar_ptcg() if es else {}
 
     def buscar(sid):
         nombre, serie = index[sid][0], index[sid][1]
@@ -324,8 +446,90 @@ def main():
             logos[sid] = hit[0]
             info[sid] = {"src": hit[1], "aprox": True, "at": hoy}
 
+    # ---------- en cada idioma ----------
+    idiomas = {lang: dict(prev.get("idiomas", {}).get(lang, {})) for lang in IDIOMAS}
+    info_l, codigos = prev.get("info_idiomas", {}), prev.get("pokemon", {})
+    vistas = prev.get("vistas", {})
+    primera_vez = "idiomas" not in prev
+    lunes = dt.date.today().weekday() == 0
+    aqui = [sid for sid in index if not sid.startswith("ja-")]
+    for sid in aqui:   # la primera vez, las que ya había cuentan como antiguas (solo se reintentan los lunes)
+        vistas.setdefault(sid, "2000-01-01" if primera_vez else hoy)
+
+    def falta(sid, lang):
+        p = idiomas[lang].get(sid)
+        return not (p and os.path.exists(os.path.join(DATA, p)))
+
+    def reciente(sid):
+        return (dt.date.today() - dt.date.fromisoformat(vistas[sid])).days <= 60
+
+    # Lo que falta en algún idioma se busca cada día los dos primeros meses de la expansión (el español suele llegar
+    # unos días más tarde que el inglés) y después los lunes (las antiguas en francés, alemán o italiano no van a salir).
+    por_buscar = [sid for sid in aqui if any(falta(sid, lang) for lang in IDIOMAS)
+                  and (primera_vez or lunes or reciente(sid))]
+    print(f"logos por idioma: {len(por_buscar)} expansiones por buscar")
+    wd = wikidex_tabla() if any(falta(sid, "es") for sid in por_buscar) else {}
+    ptcg_l = ptcg or (cargar_ptcg() if por_buscar else {})
+
+    def de_aqui(sid, *trozos):
+        src = info.get(sid, {}).get("src", "")
+        return sid in logos and not info.get(sid, {}).get("aprox") and any(t in src for t in trozos)
+
+    def buscar_idiomas(sid):
+        nombre, serie = index[sid][0], index[sid][1]
+        code, res = codigos.get(sid), {}
+        try:
+            if not code:
+                code = next((c for c in codigos_pokemon(sid, serie) if pokemon(c, "en")), None)
+            for lang in IDIOMAS:
+                if not falta(sid, lang):
+                    continue
+                hit = pokemon(code, lang) if code else None
+                if not hit and lang == "es":
+                    t = wd.get(norm(WIKIDEX_MANUAL.get(sid) or nombre))
+                    hit = wikidex(t) if t else None
+                    if not hit and de_aqui(sid, "assets.tcgdex.net/es/"):
+                        hit = ("igual", logos[sid])
+                if not hit and lang == "en":
+                    if de_aqui(sid, "assets.tcgdex.net/en/", "pokemontcg.io", "scrydex.com"):
+                        hit = ("igual", logos[sid])
+                    else:
+                        try:
+                            en = get_json(f"{API}/en/sets/{urllib.parse.quote(sid)}").get("name") or nombre
+                        except Exception:
+                            en = nombre
+                        hit = logo_en(sid, en, ptcg_l, serie)
+                if hit:
+                    res[lang] = hit
+        except Exception as e:
+            print(f"::warning::logos por idioma de {sid}: {e}")
+        return sid, code, res
+
+    with ThreadPoolExecutor(WORKERS) as ex:
+        hechos = list(ex.map(buscar_idiomas, por_buscar))
+    nuevos = defaultdict(int)
+    for sid, code, res in hechos:
+        if code:
+            codigos[sid] = code
+        for lang, (url, data) in res.items():
+            if url == "igual":   # el de `logos` ya es de ese idioma: el mismo archivo
+                idiomas[lang][sid] = data
+                info_l[f"{lang}:{sid}"] = {"src": info[sid]["src"], "at": hoy}
+            else:
+                idiomas[lang][sid] = guardar(sid, data, lang)
+                info_l[f"{lang}:{sid}"] = {"src": url, "at": hoy}
+            nuevos[lang] += 1
+    # `logos` (el de las versiones de la app sin idiomas), en las de aquí: el español.
+    for sid in aqui:
+        es_path = idiomas["es"].get(sid)
+        if es_path and logos.get(sid) != es_path:
+            logos[sid] = es_path
+            info[sid] = {"src": info_l.get(f"es:{sid}", {}).get("src", ""), "aprox": False, "at": hoy}
+    print("logos por idioma nuevos: " + (", ".join(f"{k} {v}" for k, v in nuevos.items()) or "ninguno") + "; "
+          + ", ".join(f"{lang} {len(idiomas[lang])}" for lang in IDIOMAS) + f" de {len(aqui)}")
+
     # Archivos que ya no usa nadie, fuera.
-    usados = set(logos.values())
+    usados = set(logos.values()) | {p for d in idiomas.values() for p in d.values()}
     for name in os.listdir(os.path.join(DATA, "logos")):
         if f"logos/{name}" not in usados:
             os.remove(os.path.join(DATA, "logos", name))
@@ -333,8 +537,10 @@ def main():
     sin = sorted(s for s in index if s not in logos)
     aprox = sorted(s for s in index if info.get(s, {}).get("aprox"))
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"updated": hoy, "logos": dict(sorted(logos.items())), "info": dict(sorted(info.items()))}, f,
-                  ensure_ascii=False, separators=(",", ":"))
+        json.dump({"updated": hoy, "logos": dict(sorted(logos.items())), "info": dict(sorted(info.items())),
+                   "idiomas": {lang: dict(sorted(d.items())) for lang, d in idiomas.items()},
+                   "info_idiomas": dict(sorted(info_l.items())), "pokemon": dict(sorted(codigos.items())),
+                   "vistas": dict(sorted(vistas.items()))}, f, ensure_ascii=False, separators=(",", ":"))
     print(f"{len(index) - len(sin) - len(aprox)} con su logo, {len(aprox)} con el de su serie, {len(sin)} sin logo")
     if aprox:
         print(f"::warning::{len(aprox)} expansiones con el logo de su serie (se reintentará mañana): {', '.join(aprox)}")
